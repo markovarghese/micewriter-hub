@@ -65,6 +65,13 @@ To consolidate small records into optimized Iceberg v3 Parquet files while prote
 - **Catalog Commit:** The sidecar uploads files to S3 (MinIO) and executes an atomic commit to Nessie. On `CommitFailedException` (optimistic locking failure), it uses an exponential backoff retry.
 - **SIGTERM Emergency Flush:** If Kubernetes initiates pod termination, the sidecar intercepts the `SIGTERM` signal, pauses new ingestion, forces an immediate compilation/commit of remaining RocksDB data, and exits safely.
 
+## 4. Downstream Analytics Readers
+
+This architecture intentionally abstracts away **read-after-write** capabilities from the emitting Spring Boot application. The system is fundamentally split into two optimized domains:
+
+1. **Write Optimization:** The application achieves microsecond write latency via UDS and local RocksDB caching, completely insulated from cloud API latency.
+2. **Read Optimization:** Distributed query engines (e.g., **Trino, Querybook, Athena, Spark**) require large, columnar files to execute analytical queries efficiently. By delaying the Iceberg catalog commit until the sidecar has compiled 10 minutes worth of telemetry into large Parquet files, downstream analytics platforms are saved from the catastrophic performance degradation of scanning millions of tiny S3 files.
+
 ---
 ### 🔗 The mIceWriter Ecosystem
 * **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/mmicewriter_design/README.md)
