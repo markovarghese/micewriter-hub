@@ -1,6 +1,10 @@
-# System Overview
+# 🌐 System Overview
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/mmicewriter_design/README.md)**
 
-This document outlines the core architecture and data flows for the distributed Iceberg ingestion pipeline.
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/mmicewriter_design/README.md)
+[![Component: System Overview](https://img.shields.io/badge/Component-System%20Overview-lightgrey?style=flat-square)](#)
+
+This document outlines the core architecture and data flows for the distributed mIceWriter telemetry ingestion pipeline.
 
 ## 1. Global Architecture & Topology
 
@@ -10,38 +14,38 @@ The system operates entirely within the Kubernetes pod networking boundary, ensu
 sequenceDiagram
     autonumber
     participant App as Spring Boot App (JVM)
-    participant SDK as Iceberg JVM SDK
+    participant SDK as mIceWriter SDK (Java)
     participant UDS as Unix Domain Socket
-    participant Sidecar as Rust Sidecar Engine
+    participant Engine as mIceWriter Engine (Rust)
     participant RocksDB as Local RocksDB (PVC)
-    participant Nessie as Iceberg Catalog (Nessie)
+    participant Nessie as Nessie Catalog (API)
     participant MinIO as S3 Storage (MinIO)
 
     Note over App,SDK: Startup & Registration Phase
-    SDK->>Sidecar: Register Schema (REGISTER_SCHEMA payload)
-    Sidecar->>Nessie: Query/Create Iceberg Table
-    Nessie-->>Sidecar: Table Ready / Exists
+    SDK->>Engine: Register Schema (REGISTER_SCHEMA payload)
+    Engine->>Nessie: Query/Create Iceberg Table
+    Nessie-->>Engine: Table Ready / Exists
 
     Note over App,RocksDB: Hot-Path Ingestion Phase (Microsecond Latency)
     App->>SDK: icebergTemplate.send(pojo)
     SDK->>SDK: Serialize POJO to Protobuf/Bincode
     SDK->>UDS: Write serialized payload (length-prefixed)
-    UDS->>Sidecar: Read payload bytes
-    Sidecar->>RocksDB: Async zero-copy append to active Column Family
-    Sidecar-->>SDK: Acknowledge IPC response
+    UDS->>Engine: Read payload bytes
+    Engine->>RocksDB: Async zero-copy append to active Column Family
+    Engine-->>SDK: Acknowledge IPC response
 
-    Note over Sidecar,MinIO: Jittered 10-Minute Flush Cycle
-    Sidecar->>Sidecar: Jitter timer fires, rotate RocksDB Column Family
-    Sidecar->>RocksDB: Read frozen Column Family records
-    Sidecar->>Sidecar: Compile records to Parquet & puffin deletion vectors
-    Sidecar->>MinIO: Upload Parquet files (S3 API)
-    Sidecar->>Nessie: Atomic commit append to Iceberg Table
-    Sidecar->>RocksDB: Purge frozen Column Family
+    Note over Engine,MinIO: Jittered 10-Minute Flush Cycle
+    Engine->>Engine: Jitter timer fires, rotate RocksDB Column Family
+    Engine->>RocksDB: Read frozen Column Family records
+    Engine->>Engine: Compile records to Parquet & puffin deletion vectors
+    Engine->>MinIO: Upload Parquet files (S3 API)
+    Engine->>Nessie: Atomic commit append to Iceberg Table
+    Engine->>RocksDB: Purge frozen Column Family
 ```
 
 ## 2. Unix Domain Socket (UDS) Protocol & IPC
 
-Communication between the Spring Boot SDK and the Rust sidecar occurs over a shared Unix Domain Socket located at `/var/run/app/iceberg.sock`.
+Communication between the `micewriter-sdk-java` and the `micewriter-engine` occurs over a shared Unix Domain Socket located at `/var/run/app/iceberg.sock`.
 
 ### 2.1 Packet Structure
 All IPC messages use a standard 4-byte big-endian length prefix framing protocol to ensure the Rust Tokio runtime can efficiently read complete messages off the stream without blocking.
@@ -60,3 +64,13 @@ To consolidate small records into optimized Iceberg v3 Parquet files while prote
 - **Compilation:** The frozen records are compiled into Parquet and `.puffin` files.
 - **Catalog Commit:** The sidecar uploads files to S3 (MinIO) and executes an atomic commit to Nessie. On `CommitFailedException` (optimistic locking failure), it uses an exponential backoff retry.
 - **SIGTERM Emergency Flush:** If Kubernetes initiates pod termination, the sidecar intercepts the `SIGTERM` signal, pauses new ingestion, forces an immediate compilation/commit of remaining RocksDB data, and exits safely.
+
+---
+### 🔗 The mIceWriter Ecosystem
+* **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/mmicewriter_design/README.md)
+* **System Overview:** [system-overview](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/system-overview.md)
+* **Rust Sidecar Engine:** [micewriter-engine](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-engine.md)
+* **Spring Boot SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-sdk-java.md)
+* **Kubernetes Webhook:** [micewriter-k8s-injector](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-k8s-injector.md)
+* **Local Data Lake Mock:** [micewriter-local-infra](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-local-infra.md)
+* **Reference Testing App:** [micewriter-sandbox](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-sandbox.md)

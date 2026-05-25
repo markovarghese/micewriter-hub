@@ -1,0 +1,34 @@
+{
+  "folders": [
+    {
+      "name": "micewriter-hub (Design Hub)",
+      "path": "."
+    },
+    {
+      "name": "micewriter-engine (Rust Sidecar)",
+      "path": "../micewriter-engine"
+    },
+    {
+      "name": "micewriter-sdk-java (Spring Boot Starter)",
+      "path": "../micewriter-sdk-java"
+    },
+    {
+      "name": "micewriter-k8s-injector (Admission Controller)",
+      "path": "../micewriter-k8s-injector"
+    },
+    {
+      "name": "micewriter-sandbox (Reference Application)",
+      "path": "../micewriter-sandbox"
+    },
+    {
+      "name": "micewriter-local-infra (Local Data Lake)",
+      "path": "../micewriter-local-infra"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.git": true,
+      "**/.DS_Store": true
+    }
+  }
+}

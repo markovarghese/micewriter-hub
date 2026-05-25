@@ -1,6 +1,8 @@
-# mmicewriter_design
+# 📥 micewriter-hub
+> 🌐 Central architecture, system design, and IPC protocol hub for the **[mIceWriter Ingestion Ecosystem](file:///c:/Users/marko/source/repos/mmicewriter_design/README.md)**
 
-**Architecture and Design Hub for the Distributed Iceberg Ingestion Pipeline**
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/mmicewriter_design/README.md)
+[![Component: Central Hub](https://img.shields.io/badge/Component-Central%20Hub-brightgreen?style=flat-square)](#)
 
 This repository serves as the single source of truth for the system design, network topology, and architecture of the high-throughput, low-latency telemetry ingestion platform. It decouples standard Spring Boot applications from object-storage API latency by using a memory-safe Rust sidecar and local RocksDB caching.
 
@@ -14,8 +16,8 @@ This diagram visualizes how the components are structurally laid out inside the 
 graph TD
     subgraph K8sPod ["Kubernetes Pod Boundary"]
         App["Spring Boot App Container"] -->|Netty / Epoll UDS| UDS["Unix Domain Socket<br/>(/var/run/app/iceberg.sock)"]
-        UDS -->|Tokio UnixListener| Sidecar["Rust Sidecar Container"]
-        Sidecar -->|RocksDB Crate| RocksDB[("Isolated RocksDB Cache<br/>(Generic Ephemeral PVC)")]
+        UDS -->|Tokio UnixListener| Engine["mIceWriter Engine (Rust Container)"]
+        Engine -->|RocksDB Crate| RocksDB[("Isolated RocksDB Cache<br/>(Generic Ephemeral PVC)")]
     end
 
     subgraph K8sCluster ["Kubernetes Cluster Services"]
@@ -24,8 +26,8 @@ graph TD
         Webhook["Mutating Webhook Injector"]
     end
 
-    Sidecar -->|Nessie Catalog API| Nessie
-    Sidecar -->|S3 Upload API| MinIO
+    Engine -->|Nessie Catalog API| Nessie
+    Engine -->|S3 Upload API| MinIO
     Webhook -.->|Auto-injects Sidecar & PVCs| K8sPod
     
     style K8sPod fill:#f9f9f9,stroke:#333,stroke-width:2px
@@ -39,13 +41,14 @@ graph TD
 
 The system is broken down into five distinct repositories to maintain separation of concerns between platform infrastructure, library development, K8s administration, and application engineering.
 
-| Component / Repository | Owner | Tech Stack | Design Document |
+| Component / Repository | Description | Tech Stack | Design Document |
 | :--- | :--- | :--- | :--- |
-| **`iceberg-sidecar-engine`** | Platform Core | Rust, Tokio, RocksDB | [sidecar-engine.md](docs/sidecar-engine.md) |
-| **`iceberg-spring-boot-starter`**| Developer SDK | Java, Spring, Netty | [spring-boot-starter.md](docs/spring-boot-starter.md) |
-| **`local-datalake-infra`** | Local Dev Env | Helm, Nessie, MinIO | [local-datalake.md](docs/local-datalake.md) |
-| **`telemetry-sandbox-app`** | App Engineering | Spring Boot, K8s | [sandbox-app.md](docs/sandbox-app.md) |
-| **`iceberg-sidecar-injector`** | K8s Admin | Go, Webhooks | [sidecar-injector.md](docs/sidecar-injector.md) |
+| 🌐 **`micewriter-hub`** *(This repo)* | Central architecture, system design, and IPC protocol hub. | Markdown, Mermaid | [README.md](README.md) |
+| 🦀 **`micewriter-engine`** | Memory-safe, high-throughput Rust sidecar engine for RocksDB caching. | Rust, Tokio, RocksDB, pyiceberg | [micewriter-engine.md](docs/micewriter-engine.md) |
+| ☕ **`micewriter-sdk-java`** | Spring Boot Starter SDK providing Netty-based Unix Domain Socket IPC. | Java, Spring Boot, Netty, Epoll | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
+| ☸️ **`micewriter-k8s-injector`** | Kubernetes Mutating Webhook to automate sidecar & volume injection. | Go (controller-runtime), TLS | [micewriter-k8s-injector.md](docs/micewriter-k8s-injector.md) |
+| 🧪 **`micewriter-sandbox`** | Reference Spring Boot microservice demonstrating end-to-end telemetry. | Spring Boot, Docker, K8s manifests | [micewriter-sandbox.md](docs/micewriter-sandbox.md) |
+| 🐳 **`micewriter-local-infra`**| Local data lake simulator packaging MinIO and Nessie Helm charts. | Helm, Kubernetes, MinIO, Nessie | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |
 
 ---
 
@@ -54,3 +57,25 @@ The system is broken down into five distinct repositories to maintain separation
 To explore the low-level data flows, IPC protocol specifications, and background cron flush designs, proceed to the primary system documentation:
 
 👉 **[View Detailed System Overview & IPC Protocol](docs/system-overview.md)**
+
+---
+
+## 💻 Local Multi-Root Workspace
+
+To streamline development across all five repositories locally, a VS Code multi-root workspace file is provided. 
+
+1. Clone all `micewriter-` repositories into the same parent folder.
+2. Open VS Code.
+3. Select **File > Open Workspace from File...** and choose **[micewriter.code-workspace](micewriter.code-workspace)**.
+
+This will organize all five codebases into a unified explorer sidebar in your IDE.
+
+---
+### 🔗 The mIceWriter Ecosystem
+* **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/mmicewriter_design/README.md)
+* **System Overview:** [system-overview](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/system-overview.md)
+* **Rust Sidecar Engine:** [micewriter-engine](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-engine.md)
+* **Spring Boot SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-sdk-java.md)
+* **Kubernetes Webhook:** [micewriter-k8s-injector](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-k8s-injector.md)
+* **Local Data Lake Mock:** [micewriter-local-infra](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-local-infra.md)
+* **Reference Testing App:** [micewriter-sandbox](file:///c:/Users/marko/source/repos/mmicewriter_design/docs/micewriter-sandbox.md)
