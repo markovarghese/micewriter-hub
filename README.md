@@ -52,7 +52,16 @@ The system is broken down into five distinct repositories to maintain separation
 
 ---
 
-## 🚀 Deep Dives
+## 🚀 Getting Started
+
+Ready to deploy the full stack? The end-to-end guide covers everything from provisioning
+the k3s cluster to verifying that Parquet files appear in MinIO after the first flush cycle:
+
+👉 **[End-to-End Deployment Guide](docs/getting-started.md)**
+
+---
+
+## 📖 Deep Dives
 
 To explore the low-level data flows, IPC protocol specifications, and background cron flush designs, proceed to the primary system documentation:
 
