@@ -20,14 +20,14 @@ graph TD
         Engine -->|RocksDB Crate| RocksDB[("Isolated RocksDB Cache<br/>(Generic Ephemeral PVC)")]
     end
 
-    subgraph K8sCluster ["Kubernetes Cluster Services"]
-        Nessie[("Apache Nessie Catalog")]
-        MinIO[("MinIO S3 Object Store")]
+    subgraph K8sCluster ["Kubernetes Cluster Services (or AWS)"]
+        Catalog[("Apache Nessie / AWS Glue Catalog")]
+        ObjectStore[("MinIO / AWS S3 Object Store")]
         Webhook["Mutating Webhook Injector"]
     end
 
-    Engine -->|Nessie Catalog API| Nessie
-    Engine -->|S3 Upload API| MinIO
+    Engine -->|Catalog API| Catalog
+    Engine -->|S3 Upload API| ObjectStore
     Webhook -.->|Auto-injects Sidecar & PVCs| K8sPod
     
     style K8sPod fill:#f9f9f9,stroke:#333,stroke-width:2px

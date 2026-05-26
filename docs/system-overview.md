@@ -18,18 +18,18 @@ sequenceDiagram
     participant UDS as Unix Domain Socket
     participant Engine as mIceWriter Engine (Rust)
     participant RocksDB as Local RocksDB (PVC)
-    participant Nessie as Nessie Catalog (API)
-    participant MinIO as S3 Storage (MinIO)
+    participant Catalog as Nessie / Glue Catalog (API)
+    participant ObjectStore as S3 Storage (MinIO / AWS S3)
 
     Note over App,SDK: Startup & Registration Phase
     SDK->>Engine: Register Schema (REGISTER_SCHEMA payload)
-    Engine->>Nessie: Query/Create Iceberg Table
-    Nessie-->>Engine: Table Ready / Exists
+    Engine->>Catalog: Query/Create Iceberg Table
+    Catalog-->>Engine: Table Ready / Exists
 
     Note over App,RocksDB: Hot-Path Ingestion Phase (Microsecond Latency)
     App->>SDK: icebergTemplate.send(pojo)
-    SDK->>SDK: Serialize POJO to Protobuf/Bincode
-    SDK->>UDS: Write serialized payload (length-prefixed)
+    SDK->>SDK: Serialize POJO to Arrow IPC RecordBatch
+    SDK->>UDS: Write Arrow IPC payload (length-prefixed)
     UDS->>Engine: Read payload bytes
     Engine->>RocksDB: Async zero-copy append to active Column Family
     Engine-->>SDK: Acknowledge IPC response
@@ -37,9 +37,9 @@ sequenceDiagram
     Note over Engine,MinIO: Jittered 10-Minute Flush Cycle
     Engine->>Engine: Jitter timer fires, rotate RocksDB Column Family
     Engine->>RocksDB: Read frozen Column Family records
-    Engine->>Engine: Compile records to Parquet & puffin deletion vectors
-    Engine->>MinIO: Upload Parquet files (S3 API)
-    Engine->>Nessie: Atomic commit append to Iceberg Table
+    Engine->>Engine: Compile records to Parquet
+    Engine->>ObjectStore: Upload Parquet files (S3 API)
+    Engine->>Catalog: Atomic commit append to Iceberg Table
     Engine->>RocksDB: Purge frozen Column Family
 ```
 
@@ -54,15 +54,15 @@ All IPC messages use a standard 4-byte big-endian length prefix framing protocol
 
 ### 2.2 Serialization
 - **Schemas:** Handshake messages (`REGISTER_SCHEMA`) are sent as JSON.
-- **Telemetry Records:** Hot-path ingestion records (`INGEST_RECORD`) are serialized via Bincode or Protobuf before transmission to ensure maximum throughput and minimal allocation overhead.
+- **Telemetry Records:** Hot-path ingestion records (`INGEST_RECORD`) are streamed as native **Apache Arrow IPC** bytes. This entirely eliminates JSON parsing overhead in the sidecar and guarantees perfect type fidelity. The payload size is capped at 128 MB to prevent OOM attacks.
 
 ## 3. The Flush Cycle & Graceful Shutdown
 
 To consolidate small records into optimized Iceberg v3 Parquet files while protecting the Catalog API from rate limits (the "Thundering Herd" problem):
 
 - **Jittered Column Family Swap:** The Rust cron thread wakes up on a randomized (jittered) schedule (e.g., 10 minutes ± 2 minutes). It swaps incoming traffic to a new RocksDB Column Family, freezing the old one.
-- **Compilation:** The frozen records are compiled into Parquet and `.puffin` files.
-- **Catalog Commit:** The sidecar uploads files to S3 (MinIO) and executes an atomic commit to Nessie. On `CommitFailedException` (optimistic locking failure), it uses an exponential backoff retry.
+- **Compilation:** The frozen records (Arrow IPC) are compiled into Parquet files. Note: The engine performs fast, append-only operations; Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs.
+- **Catalog Commit:** The sidecar uploads files to S3 (MinIO or AWS S3) and executes an atomic commit to the configured catalog (Nessie or AWS Glue). On `CommitFailedException` (optimistic locking failure), it uses an exponential backoff retry.
 - **SIGTERM Emergency Flush:** If Kubernetes initiates pod termination, the sidecar intercepts the `SIGTERM` signal, pauses new ingestion, forces an immediate compilation/commit of remaining RocksDB data, and exits safely.
 
 ## 4. Downstream Analytics Readers
