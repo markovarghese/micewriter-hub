@@ -11,7 +11,7 @@ cluster provisioned by [k3sonhyperv](https://github.com/markovarghese/k3sonhyper
 | Requirement | How to satisfy it |
 |---|---|
 | k3s cluster running | Follow the k3sonhyperv README through Step 4 (verify nodes) |
-| `D:\githubrepos\k3sonhyperv\kubeconfig` exists | Produced automatically by `install-k3s.yml` |
+| `$HOME/.kube/config` exists | Produced automatically by `install-k3s.yml` (moved from repository) |
 | Docker Desktop running | Start from the system tray |
 | All micewriter repos cloned | Clone each sibling repo into the same parent folder |
 
@@ -151,7 +151,7 @@ The sidecar flushes every ~10 minutes (jittered). Stream its logs to watch:
 
 ```powershell
 docker run --rm -i `
-  -v "D:\githubrepos\k3sonhyperv\kubeconfig:/kubeconfig:ro" `
+  -v "$HOME\.kube\config:/kubeconfig:ro" `
   -e KUBECONFIG=/kubeconfig `
   bitnami/kubectl:latest `
   logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine --follow
