@@ -67,6 +67,10 @@ To explore the low-level data flows, IPC protocol specifications, and background
 
 👉 **[View Detailed System Overview & IPC Protocol](docs/system-overview.md)**
 
+To learn how to run SQL against your Iceberg tables using AWS Athena (cloud) or Querybook + Trino (local):
+
+👉 **[Querying Iceberg Tables — Athena & Querybook](docs/querying.md)**
+
 ---
 
 ## 💻 Local Multi-Root Workspace

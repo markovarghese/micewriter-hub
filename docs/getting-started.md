@@ -177,6 +177,14 @@ iceberg_writer: commit succeeded, snapshot_id=...
 
 ---
 
+## Step 8 — Query your data
+
+Once the engine has completed its first flush cycle (watch for `iceberg_writer: commit succeeded` in the logs), the Iceberg table is ready to query.
+
+👉 **[Querying Iceberg Tables — Athena & Querybook guide](querying.md)**
+
+---
+
 ## Teardown
 
 ```powershell
