@@ -213,7 +213,7 @@ iceberg_writer: commit succeeded, snapshot_id=...
 * **Architecture Hub:** [micewriter-hub](../README.md)
 * **System Overview:** [system-overview](system-overview.md)
 * **Rust Sidecar Engine:** [micewriter-engine](micewriter-engine.md)
-* **Spring Boot SDK:** [micewriter-sdk-java](micewriter-sdk-java.md)
+* **Java SDK:** [micewriter-sdk-java](micewriter-sdk-java.md)
 * **Kubernetes Webhook:** [micewriter-k8s-injector](micewriter-k8s-injector.md)
 * **Local Data Lake:** [micewriter-local-infra](micewriter-local-infra.md)
 * **Reference Testing App:** [micewriter-sandbox](micewriter-sandbox.md)

@@ -13,7 +13,7 @@ The system operates entirely within the Kubernetes pod networking boundary, ensu
 ```mermaid
 sequenceDiagram
     autonumber
-    participant App as Spring Boot App (JVM)
+    participant App as Java App (Spring Boot / Dropwizard)
     participant SDK as mIceWriter SDK (Java)
     participant UDS as Unix Domain Socket
     participant Engine as mIceWriter Engine (Rust)
@@ -77,7 +77,7 @@ This architecture intentionally abstracts away **read-after-write** capabilities
 * **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
 * **System Overview:** [system-overview](file:///c:/Users/marko/source/repos/micewriter-hub/docs/system-overview.md)
 * **Rust Sidecar Engine:** [micewriter-engine](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-engine.md)
-* **Spring Boot SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sdk-java.md)
+* **Java SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sdk-java.md)
 * **Kubernetes Webhook:** [micewriter-k8s-injector](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-k8s-injector.md)
 * **Local Data Lake Mock:** [micewriter-local-infra](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-local-infra.md)
 * **Reference Testing App:** [micewriter-sandbox](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sandbox.md)

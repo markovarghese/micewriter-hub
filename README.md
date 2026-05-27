@@ -45,7 +45,7 @@ The system is broken down into five distinct repositories to maintain separation
 | :--- | :--- | :--- | :--- |
 | 🌐 **`micewriter-hub`** *(This repo)* | Central architecture, system design, and IPC protocol hub. | Markdown, Mermaid | [README.md](README.md) |
 | 🦀 **`micewriter-engine`** | Memory-safe, high-throughput Rust sidecar engine for RocksDB caching. | Rust, Tokio, RocksDB, pyiceberg | [micewriter-engine.md](docs/micewriter-engine.md) |
-| ☕ **`micewriter-sdk-java`** | Spring Boot Starter SDK providing Netty-based Unix Domain Socket IPC. | Java, Spring Boot, Netty, Epoll | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
+| ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot & Dropwizard) providing Netty-based Unix Domain Socket IPC. | Java, Spring Boot, Dropwizard, Netty, Arrow IPC | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
 | ☸️ **`micewriter-k8s-injector`** | Kubernetes Mutating Webhook to automate sidecar & volume injection. | Go (controller-runtime), TLS | [micewriter-k8s-injector.md](docs/micewriter-k8s-injector.md) |
 | 🧪 **`micewriter-sandbox`** | Reference Spring Boot microservice demonstrating end-to-end telemetry. | Spring Boot, Docker, K8s manifests | [micewriter-sandbox.md](docs/micewriter-sandbox.md) |
 | 🐳 **`micewriter-local-infra`**| Local data lake simulator packaging MinIO and Nessie Helm charts. | Helm, Kubernetes, MinIO, Nessie | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |
@@ -84,7 +84,7 @@ This will organize all five codebases into a unified explorer sidebar in your ID
 * **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
 * **System Overview:** [system-overview](file:///c:/Users/marko/source/repos/micewriter-hub/docs/system-overview.md)
 * **Rust Sidecar Engine:** [micewriter-engine](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-engine.md)
-* **Spring Boot SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sdk-java.md)
+* **Java SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sdk-java.md)
 * **Kubernetes Webhook:** [micewriter-k8s-injector](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-k8s-injector.md)
 * **Local Data Lake Mock:** [micewriter-local-infra](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-local-infra.md)
 * **Reference Testing App:** [micewriter-sandbox](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sandbox.md)
