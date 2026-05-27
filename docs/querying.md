@@ -56,54 +56,33 @@ LIMIT 100;
 Querybook  →  Trino  →  Nessie Iceberg REST  →  MinIO (Parquet)
 ```
 
-### Step 1 — Deploy Trino into the local cluster
+### Step 1 — Deploy Trino + Querybook into the local cluster
 
-Trino is not included in `micewriter-local-infra` by default and must be added. Add a Helm release using the official [trinodb/trino](https://trinodb.github.io/charts/) chart with the following catalog configuration:
-
-```yaml
-# values-trino.yaml (add to micewriter-local-infra)
-additionalCatalogs:
-  iceberg: |
-    connector.name=iceberg
-    iceberg.catalog.type=rest
-    iceberg.rest-catalog.uri=http://nessie.micewriter-infra.svc.cluster.local:19120/iceberg/v1
-    fs.native-s3.enabled=true
-    s3.endpoint=http://minio.micewriter-infra.svc.cluster.local:9000
-    s3.region=us-east-1
-    s3.aws-access-key=micewriter
-    s3.aws-secret-key=micewriter123
-    s3.path-style-access=true
-
-service:
-  type: NodePort
-```
-
-Install the chart and expose the coordinator externally (NodePort or Ingress) so Querybook can reach it:
+Trino and Querybook are included in `micewriter-local-infra` as an optional query stack. Deploy them with a single command from that repo:
 
 ```powershell
-helm repo add trino https://trinodb.github.io/charts
-helm upgrade --install trino trino/trino \
-  --namespace micewriter-infra \
-  --values values-trino.yaml
+.\run.ps1 query-up
 ```
+
+This installs Trino (via the official [trinodb/trino](https://trinodb.github.io/charts/) Helm chart with the Iceberg/Nessie/MinIO catalog pre-configured) and Querybook (with its MySQL and Redis dependencies) into the `micewriter-infra` namespace.
 
 Verify Trino is healthy before proceeding:
 
 ```powershell
-curl http://k8s-node-1.local:<trino-port>/v1/info
+curl http://k8s-node-1.local:8080/v1/info
 # → {"nodeVersion":{"version":"..."}, "starting":false, ...}
 ```
 
 ### Step 2 — Add Trino as a query engine in Querybook
 
-In the Querybook **Admin UI** (`/admin/query_engine/`):
+Open Querybook at `http://k8s-node-1.local:10001` and go to the **Admin UI** (`/admin/query_engine/`):
 
 | Field | Value |
 |---|---|
 | **Name** | `trino-local` (or any label) |
 | **Language** | `trino` |
-| **Host** | `k8s-node-1.local` |
-| **Port** | `<trino NodePort>` |
+| **Host** | `trino.micewriter-infra.svc.cluster.local` |
+| **Port** | `8080` |
 | **Catalog** | `iceberg` |
 | **Schema** | `micewriter` (matches `CATALOG_NAMESPACE` in the engine config) |
 

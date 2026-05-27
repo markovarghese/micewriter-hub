@@ -7,17 +7,31 @@
 This repository contains the Kubernetes manifests and Helm charts required to simulate the AWS S3 and AWS Glue ecosystem on a local multi-node cluster (e.g., Minikube, Kind, Docker Desktop).
 
 ## 🛠️ Core Technology Stack
-- **Orchestration:** Helm, Kubernetes Manifests
+- **Orchestration:** Helm, Kubernetes Manifests (kubectl and helm run inside Docker — no native tools required)
 - **Object Storage:** MinIO
-- **Iceberg Catalog:** Apache Nessie (or Iceberg REST Catalog)
+- **Iceberg Catalog:** Apache Nessie (in-memory, ephemeral by design for local dev)
+- **Query Engine (optional):** Trino with Iceberg REST connector
+- **Query UI (optional):** Querybook (with MySQL + Redis)
 
 ## ⚙️ Functionality
 Provides a 1-click local testing environment for developers to test the full pipeline end-to-end without needing real cloud credentials.
 1. **Storage Mock:** Deploys MinIO to act as an S3-compatible object store, allowing the sidecar to upload Parquet files using standard AWS SDKs pointed to the local endpoint.
-2. **Catalog Mock:** Deploys Apache Nessie backed by an in-memory or Postgres database to handle atomic Iceberg table commits and versioning.
+2. **Catalog Mock:** Deploys Apache Nessie (in-memory) to handle atomic Iceberg table commits and versioning.
+3. **Query Stack (optional):** Deploys Trino (pre-configured with the Iceberg/Nessie/MinIO catalog) and Querybook (SQL notebook UI). See [querying.md](querying.md) for usage.
+
+## 🚀 Commands
+
+```powershell
+.\run.ps1 up          # Deploy core infra: cert-manager, registry, MinIO, Nessie
+.\run.ps1 down        # Uninstall MinIO + Nessie (keeps namespace and PVCs)
+.\run.ps1 clean       # Full teardown — purges namespace and all PVCs
+.\run.ps1 status      # Show pod status in micewriter-infra namespace
+.\run.ps1 query-up    # Deploy optional query stack: Trino + Querybook
+.\run.ps1 query-down  # Tear down Trino + Querybook
+```
 
 ## 📦 Output Artifact
-Ready-to-use Helm `values.yaml` files and bash scripts (e.g., `make up`) to instantly spin up the local data lake.
+Ready-to-use Helm `values.yaml` files and PowerShell/Make scripts to instantly spin up the full local data lake and query stack.
 
 ---
 ### 🔗 The mIceWriter Ecosystem
