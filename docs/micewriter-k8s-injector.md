@@ -7,11 +7,11 @@
 This repository provides the "Service Mesh" style auto-injection. It is the Mutating Webhook that provides the gold standard Developer Experience by hiding all infrastructure boilerplate from the application engineers.
 
 ## 🛠️ Core Technology Stack
-- **Language:** Go (Kubernetes controller-runtime) or Python (Kopf/FastAPI)
+- **Language:** Go (`k8s.io/api`, `k8s.io/apimachinery` — no controller-runtime)
 - **K8s Feature:** Mutating Admission Webhooks, TLS Certificates
 
 ## ⚙️ Functionality
-Intersects the Kubernetes API during Pod creation. If it detects a deployment labeled with `iceberg-stream.yourcompany.com/inject: "true"`, it alters the PodSpec on the fly.
+Intersects the Kubernetes API during Pod creation. If it detects a deployment labeled with `iceberg-stream.micewriter.io/inject: "true"`, it alters the PodSpec on the fly.
 
 ### Injections Performed
 1. **The Sidecar:** Injects the `micewriter-engine` container image into the pod, applying dynamically configurable resource requests/limits and least-privilege security contexts.

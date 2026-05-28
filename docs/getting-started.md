@@ -110,7 +110,7 @@ From the `micewriter-k8s-injector` directory:
 > occasionally take a moment to be served after the pods become Available.
 
 The webhook is now live. Any pod created with the annotation
-`iceberg-stream.yourcompany.com/inject: "true"` will automatically receive the engine
+`iceberg-stream.micewriter.io/inject: "true"` will automatically receive the engine
 sidecar, the shared UDS socket volume, and a RocksDB PVC.
 
 ---
