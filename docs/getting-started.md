@@ -150,11 +150,7 @@ curl -X POST "http://k8s-node-1.local/events/load?count=1000"
 The sidecar flushes every ~10 minutes (jittered). Stream its logs to watch:
 
 ```powershell
-docker run --rm -i `
-  -v "$HOME\.kube\config:/kubeconfig:ro" `
-  -e KUBECONFIG=/kubeconfig `
-  bitnami/kubectl:latest `
-  logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine --follow
+kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine --follow
 ```
 
 Look for log lines like:
