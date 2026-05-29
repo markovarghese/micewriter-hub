@@ -48,23 +48,23 @@ LIMIT 100;
 
 ---
 
-## 2. Local / Dev — Querybook via Trino
+## 2. Local / Dev — Superset via Trino
 
-[Querybook](https://www.querybook.org/) is a SQL notebook UI — it does **not** connect to Nessie or Iceberg directly. It delegates query execution to a backend engine. For the local k3s stack, that engine is **Trino**, which has a native Iceberg catalog connector with REST catalog support (compatible with Nessie's Iceberg REST endpoint).
+[Apache Superset](https://superset.apache.org/) is a SQL UI and dashboarding tool — it does **not** connect to Nessie or Iceberg directly. It delegates query execution to a backend engine. For the local k3s stack, that engine is **Trino**, which has a native Iceberg catalog connector with REST catalog support (compatible with Nessie's Iceberg REST endpoint).
 
 ```
-Querybook  →  Trino  →  Nessie Iceberg REST  →  MinIO (Parquet)
+Superset  →  Trino  →  Nessie Iceberg REST  →  MinIO (Parquet)
 ```
 
-### Step 1 — Deploy Trino + Querybook into the local cluster
+### Step 1 — Deploy Trino + Superset into the local cluster
 
-Trino and Querybook are included in `micewriter-local-infra` as an optional query stack. Deploy them with a single command from that repo:
+Trino and Superset are included in `micewriter-local-infra` as an optional query stack. Deploy them with a single command from that repo:
 
 ```powershell
 .\run.ps1 query-up
 ```
 
-This installs Trino (via the official [trinodb/trino](https://trinodb.github.io/charts/) Helm chart with the Iceberg/Nessie/MinIO catalog pre-configured) and Querybook (with its MySQL and Redis dependencies) into the `micewriter-infra` namespace.
+This builds a custom Superset image (with the Trino SQLAlchemy driver added), pushes it to the local registry, installs Trino (via the official [trinodb/trino](https://trinodb.github.io/charts/) Helm chart with the Iceberg/Nessie/MinIO catalog pre-configured), and deploys Superset (with its PostgreSQL and Redis dependencies) into the `micewriter-infra` namespace.
 
 Verify Trino is healthy before proceeding:
 
@@ -73,22 +73,22 @@ curl http://k8s-node-1.local:8080/v1/info
 # → {"nodeVersion":{"version":"..."}, "starting":false, ...}
 ```
 
-### Step 2 — Add Trino as a query engine in Querybook
+### Step 2 — Add Trino as a database connection in Superset
 
-Open Querybook at `http://k8s-node-1.local:10001` and go to the **Admin UI** (`/admin/query_engine/`):
+Open Superset at `http://k8s-node-1.local:8088` and log in with `admin` / `admin`.
+
+Go to **Settings > Database Connections > + Database**, select **Trino**, and enter:
 
 | Field | Value |
 |---|---|
-| **Name** | `trino-local` (or any label) |
-| **Language** | `trino` |
-| **Host** | `trino.micewriter-infra.svc.cluster.local` |
-| **Port** | `8080` |
-| **Catalog** | `iceberg` |
-| **Schema** | `micewriter` (matches `CATALOG_NAMESPACE` in the engine config) |
+| **Display name** | `Trino Iceberg` (or any label) |
+| **SQLAlchemy URI** | `trino://admin@trino.micewriter-infra.svc.cluster.local:8080/iceberg` |
 
-### Step 3 — Query in a Querybook DataDoc
+Click **Test Connection** to verify, then **Connect**.
 
-Open a new DataDoc, select the `trino-local` engine, and run:
+### Step 3 — Query in SQL Lab
+
+Go to **SQL > SQL Lab**, select the `Trino Iceberg` database and `micewriter` schema, then run:
 
 ```sql
 -- Preview recent events
