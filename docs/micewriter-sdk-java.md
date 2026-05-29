@@ -51,6 +51,7 @@ Every message over the UDS has this layout:
 |---|---|---|
 | `REGISTER_SCHEMA` | `0x01` | JSON `{ table, namespace, fields }` |
 | `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][schema_id i32=0][Arrow IPC stream]` |
+| `FLUSH_NOW`       | `0x03` | `[Empty Payload]` |
 | ACK (engine → SDK) | — | JSON `{ status: "ok"\|"error", msg? }` |
 
 ## 🏗️ Spring Boot Usage
