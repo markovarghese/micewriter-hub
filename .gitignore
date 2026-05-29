@@ -1,1 +1,13 @@
+# Claude Code local settings
 .claude/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
