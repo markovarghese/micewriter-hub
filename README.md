@@ -71,6 +71,10 @@ To learn how to run SQL against your Iceberg tables using AWS Athena (cloud) or 
 
 👉 **[Querying Iceberg Tables — Athena & Querybook](docs/querying.md)**
 
+To understand the load testing strategy and right-size engine sidecar CPU/memory for a given event rate and payload size:
+
+👉 **[Load Testing Specification](docs/load-testing-spec.md)**
+
 ---
 
 ## 💻 Local Multi-Root Workspace
