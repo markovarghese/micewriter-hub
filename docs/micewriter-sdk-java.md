@@ -16,7 +16,7 @@ It is a **Maven multi-module project** that ships three artifacts from a single 
 ## 🛠️ Core Technology Stack
 - **Language:** Java 17
 - **Framework support:** Spring Boot AutoConfiguration **and** Dropwizard 4.x Bundle
-- **Serialization:** Apache Arrow IPC (RecordBatch stream format)
+- **Serialization:** CBOR (Concise Binary Object Representation) via Jackson `CBORFactory`
 - **Network IO:** Netty Epoll (UDS communication — Linux only)
 
 ## ⚙️ Functionality
@@ -29,7 +29,7 @@ This library abstracts away the IPC complexity so business developers just write
    - *Spring Boot*: scans the classpath automatically via `SpringSchemaRegistrar` on `ContextRefreshedEvent`; bounded by `micewriter.base-package`.
    - *Dropwizard*: entity classes are declared explicitly via `MicewriterBundle.entities(...)` because Dropwizard provides no classpath scanner.
 
-3. **`IcebergStreamTemplate`:** Exposes a `.send(pojo)` method that serializes the object into **Apache Arrow IPC RecordBatch** bytes and sends it as an `INGEST_RECORD` (0x02) message over the Unix Domain Socket. Blocks until the engine ACKs the RocksDB write (typically microseconds). The template is:
+3. **`IcebergStreamTemplate`:** Exposes a `.send(pojo)` method that serializes the object into **CBOR** bytes and sends it as an `INGEST_RECORD` (0x02) message over the Unix Domain Socket. Blocks until the engine ACKs the RocksDB write (typically microseconds). The template is:
    - A Spring `@Bean` in Spring Boot apps (injected with `@Autowired`).
    - Retrieved via `MicewriterBundle.getTemplate()` in Dropwizard apps.
 
@@ -50,7 +50,7 @@ Every message over the UDS has this layout:
 | Message | Type byte | Payload encoding |
 |---|---|---|
 | `REGISTER_SCHEMA` | `0x01` | JSON `{ table, namespace, fields }` |
-| `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][schema_id i32=0][Arrow IPC stream]` |
+| `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][CBOR bytes]` |
 | `FLUSH_NOW`       | `0x03` | `[Empty Payload]` |
 | ACK (engine → SDK) | — | JSON `{ status: "ok"\|"error", msg? }` |
 
@@ -67,7 +67,7 @@ Add the starter dependency — it auto-configures everything via `META-INF/sprin
 ```
 
 ```java
-@IcebergEntity(table = "telemetry_events", namespace = "analytics")
+@IcebergEntity(table = "telemetry_events", namespace = {"analytics"})
 public class TelemetryEvent {
     @IcebergId private String id;
     private String source;

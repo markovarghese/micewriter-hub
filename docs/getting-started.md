@@ -177,7 +177,7 @@ iceberg_writer: commit succeeded, snapshot_id=...
 
 Once the engine has completed its first flush cycle (watch for `iceberg_writer: commit succeeded` in the logs), the Iceberg table is ready to query.
 
-👉 **[Querying Iceberg Tables — Athena & Querybook guide](querying.md)**
+👉 **[Querying Iceberg Tables — Athena & Superset guide](querying.md)**
 
 ---
 

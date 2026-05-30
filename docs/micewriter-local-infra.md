@@ -4,7 +4,7 @@
 [![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
 [![Component: Local Infrastructure](https://img.shields.io/badge/Component-Local%20Infrastructure-green?style=flat-square)](#)
 
-This repository contains the Kubernetes manifests and Helm charts required to simulate the AWS S3 and AWS Glue ecosystem on a local multi-node cluster (e.g., Minikube, Kind, Docker Desktop).
+This repository contains the Kubernetes manifests and Helm charts required to simulate the AWS S3 and AWS Glue ecosystem on the local k3s-on-Hyper-V cluster provisioned by the [k3sonhyperv](https://github.com/markovarghese/k3sonhyperv) repo. All endpoints are bound to `k8s-node-1.local` (the k3s control-plane node) via k3s Klipper LoadBalancer; the `local-path` storage class is assumed for PVCs.
 
 ## 🛠️ Core Technology Stack
 - **Orchestration:** Helm, Kubernetes Manifests (kubectl and helm run inside Docker — no native tools required)

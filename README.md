@@ -44,9 +44,9 @@ The system is broken down into five distinct repositories to maintain separation
 | Component / Repository | Description | Tech Stack | Design Document |
 | :--- | :--- | :--- | :--- |
 | 🌐 **`micewriter-hub`** *(This repo)* | Central architecture, system design, and IPC protocol hub. | Markdown, Mermaid | [README.md](README.md) |
-| 🦀 **`micewriter-engine`** | Memory-safe, high-throughput Rust sidecar engine for RocksDB caching. | Rust, Tokio, RocksDB, pyiceberg | [micewriter-engine.md](docs/micewriter-engine.md) |
-| ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot & Dropwizard) providing Netty-based Unix Domain Socket IPC. | Java, Spring Boot, Dropwizard, Netty, Arrow IPC | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
-| ☸️ **`micewriter-k8s-injector`** | Kubernetes Mutating Webhook to automate sidecar & volume injection. | Go (controller-runtime), TLS | [micewriter-k8s-injector.md](docs/micewriter-k8s-injector.md) |
+| 🦀 **`micewriter-engine`** | Memory-safe, high-throughput Rust sidecar engine for RocksDB caching. | Rust, Tokio, RocksDB, iceberg-rust | [micewriter-engine.md](docs/micewriter-engine.md) |
+| ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot & Dropwizard) providing Netty-based Unix Domain Socket IPC. | Java, Spring Boot, Dropwizard, Netty, CBOR | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
+| ☸️ **`micewriter-k8s-injector`** | Kubernetes Mutating Webhook to automate sidecar & volume injection. | Go (k8s.io/api, k8s.io/apimachinery), TLS | [micewriter-k8s-injector.md](docs/micewriter-k8s-injector.md) |
 | 🧪 **`micewriter-sandbox`** | Reference Spring Boot microservice demonstrating end-to-end telemetry. | Spring Boot, Docker, K8s manifests | [micewriter-sandbox.md](docs/micewriter-sandbox.md) |
 | 🐳 **`micewriter-local-infra`**| Local data lake simulator packaging MinIO and Nessie Helm charts. | Helm, Kubernetes, MinIO, Nessie | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |
 
@@ -67,9 +67,9 @@ To explore the low-level data flows, IPC protocol specifications, and background
 
 👉 **[View Detailed System Overview & IPC Protocol](docs/system-overview.md)**
 
-To learn how to run SQL against your Iceberg tables using AWS Athena (cloud) or Querybook + Trino (local):
+To learn how to run SQL against your Iceberg tables using AWS Athena (cloud) or Apache Superset + Trino (local):
 
-👉 **[Querying Iceberg Tables — Athena & Querybook](docs/querying.md)**
+👉 **[Querying Iceberg Tables — Athena & Superset](docs/querying.md)**
 
 To understand the load testing strategy and right-size engine sidecar CPU/memory for a given event rate and payload size:
 
