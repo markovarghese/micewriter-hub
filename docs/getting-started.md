@@ -1,6 +1,11 @@
 # Getting Started
 > 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
+[![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
+
+> **Role in the [feasibility evaluation](feasibility.md):** the operational deploy flow that stands up the local stack before any load test runs. Steps 1–6 deploy infrastructure + engine + webhook + sandbox; Step 7 onward verifies the pipeline is ready to drive load against. Running the [load testing specification](load-testing-spec.md) assumes this guide has been completed once.
+
 End-to-end guide for deploying the full mIceWriter stack onto the local k3s-on-Hyper-V
 cluster provisioned by [k3sonhyperv](https://github.com/markovarghese/k3sonhyperv).
 
@@ -214,10 +219,22 @@ Once the engine has completed its first flush cycle (watch for `iceberg_writer: 
 ---
 
 ### 🔗 The mIceWriter Ecosystem
-* **Architecture Hub:** [micewriter-hub](../README.md)
-* **System Overview:** [system-overview](system-overview.md)
-* **Rust Sidecar Engine:** [micewriter-engine](micewriter-engine.md)
-* **Java SDK:** [micewriter-sdk-java](micewriter-sdk-java.md)
-* **Kubernetes Webhook:** [micewriter-k8s-injector](micewriter-k8s-injector.md)
-* **Local Data Lake:** [micewriter-local-infra](micewriter-local-infra.md)
-* **Reference Testing App:** [micewriter-sandbox](micewriter-sandbox.md)
+
+**🎯 Why:**
+* [Motivation & target adopter](why.md)
+
+**🛠️ What:**
+* [System overview & IPC protocol](system-overview.md)
+* [Rust sidecar engine](micewriter-engine.md)
+* [Java SDK](micewriter-sdk-java.md)
+* [Kubernetes injector](micewriter-k8s-injector.md)
+
+**🔬 Is it viable?**
+* [Feasibility evaluation](feasibility.md)
+* [Getting started (local deploy)](getting-started.md)
+* [Local infrastructure](micewriter-local-infra.md)
+* [Reference sandbox app](micewriter-sandbox.md)
+* [Load testing specification](load-testing-spec.md)
+
+**📊 Use:**
+* [Querying Iceberg tables](querying.md)

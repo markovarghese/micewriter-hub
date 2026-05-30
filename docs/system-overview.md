@@ -2,6 +2,7 @@
 > 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
 
 [![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: System Overview](https://img.shields.io/badge/Component-System%20Overview-lightgrey?style=flat-square)](#)
 
 This document outlines the core architecture and data flows for the distributed mIceWriter telemetry ingestion pipeline.
@@ -34,7 +35,7 @@ sequenceDiagram
     Engine->>RocksDB: Async zero-copy append to active Column Family
     Engine-->>SDK: Acknowledge IPC response
 
-    Note over Engine,MinIO: Jittered 10-Minute Flush Cycle
+    Note over Engine,ObjectStore: Jittered 10-Minute Flush Cycle
     Engine->>Engine: Jitter timer fires, rotate RocksDB Column Family
     Engine->>RocksDB: Read frozen Column Family records
     Engine->>Engine: Parse CBOR & compile to Parquet batches
@@ -75,10 +76,22 @@ This architecture intentionally abstracts away **read-after-write** capabilities
 
 ---
 ### 🔗 The mIceWriter Ecosystem
-* **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
-* **System Overview:** [system-overview](file:///c:/Users/marko/source/repos/micewriter-hub/docs/system-overview.md)
-* **Rust Sidecar Engine:** [micewriter-engine](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-engine.md)
-* **Java SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sdk-java.md)
-* **Kubernetes Webhook:** [micewriter-k8s-injector](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-k8s-injector.md)
-* **Local Data Lake Mock:** [micewriter-local-infra](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-local-infra.md)
-* **Reference Testing App:** [micewriter-sandbox](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sandbox.md)
+
+**🎯 Why:**
+* [Motivation & target adopter](why.md)
+
+**🛠️ What:**
+* [System overview & IPC protocol](system-overview.md)
+* [Rust sidecar engine](micewriter-engine.md)
+* [Java SDK](micewriter-sdk-java.md)
+* [Kubernetes injector](micewriter-k8s-injector.md)
+
+**🔬 Is it viable?**
+* [Feasibility evaluation](feasibility.md)
+* [Getting started (local deploy)](getting-started.md)
+* [Local infrastructure](micewriter-local-infra.md)
+* [Reference sandbox app](micewriter-sandbox.md)
+* [Load testing specification](load-testing-spec.md)
+
+**📊 Use:**
+* [Querying Iceberg tables](querying.md)

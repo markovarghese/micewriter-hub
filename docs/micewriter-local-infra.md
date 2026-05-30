@@ -2,7 +2,10 @@
 > 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
 
 [![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
 [![Component: Local Infrastructure](https://img.shields.io/badge/Component-Local%20Infrastructure-green?style=flat-square)](#)
+
+> **Role in the [feasibility evaluation](feasibility.md):** stands in for the AWS S3 + Glue side of production EKS. Without this, the engine sidecar has no catalog to commit to and no object store to upload to during load testing.
 
 This repository contains the Kubernetes manifests and Helm charts required to simulate the AWS S3 and AWS Glue ecosystem on the local k3s-on-Hyper-V cluster provisioned by the [k3sonhyperv](https://github.com/markovarghese/k3sonhyperv) repo. All endpoints are bound to `k8s-node-1.local` (the k3s control-plane node) via k3s Klipper LoadBalancer; the `local-path` storage class is assumed for PVCs.
 
@@ -35,10 +38,22 @@ Ready-to-use Helm `values.yaml` files and PowerShell/Make scripts to instantly s
 
 ---
 ### 🔗 The mIceWriter Ecosystem
-* **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
-* **System Overview:** [system-overview](file:///c:/Users/marko/source/repos/micewriter-hub/docs/system-overview.md)
-* **Rust Sidecar Engine:** [micewriter-engine](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-engine.md)
-* **Java SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sdk-java.md)
-* **Kubernetes Webhook:** [micewriter-k8s-injector](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-k8s-injector.md)
-* **Local Data Lake Mock:** [micewriter-local-infra](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-local-infra.md)
-* **Reference Testing App:** [micewriter-sandbox](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sandbox.md)
+
+**🎯 Why:**
+* [Motivation & target adopter](why.md)
+
+**🛠️ What:**
+* [System overview & IPC protocol](system-overview.md)
+* [Rust sidecar engine](micewriter-engine.md)
+* [Java SDK](micewriter-sdk-java.md)
+* [Kubernetes injector](micewriter-k8s-injector.md)
+
+**🔬 Is it viable?**
+* [Feasibility evaluation](feasibility.md)
+* [Getting started (local deploy)](getting-started.md)
+* [Local infrastructure](micewriter-local-infra.md)
+* [Reference sandbox app](micewriter-sandbox.md)
+* [Load testing specification](load-testing-spec.md)
+
+**📊 Use:**
+* [Querying Iceberg tables](querying.md)

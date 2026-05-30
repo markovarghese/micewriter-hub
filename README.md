@@ -1,16 +1,32 @@
 # 📥 micewriter-hub
-> 🌐 Central architecture, system design, and IPC protocol hub for the **[mIceWriter Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Architecture, motivation, and feasibility evaluation for the **mIceWriter Ingestion Ecosystem** — a sidecar that lets EKS-deployed apps persist to Apache Iceberg without blocking the hot path or burdening their JVM.
 
 [![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
 [![Component: Central Hub](https://img.shields.io/badge/Component-Central%20Hub-brightgreen?style=flat-square)](#)
 
-This repository serves as the single source of truth for the system design, network topology, and architecture of the high-throughput, low-latency telemetry ingestion platform. It decouples standard Spring Boot applications from object-storage API latency by using a memory-safe Rust sidecar and local RocksDB caching.
+mIceWriter is an **opt-in sidecar** for applications running on AWS EKS (or any Kubernetes cluster) that need to persist telemetry, audit, or model-payload data to Apache Iceberg tables — without paying S3 latency on the hot path, without buffering large payloads in their own JVM heap, and without flooding S3 with tiny files that ruin downstream query performance.
+
+Adoption is a single pod annotation. A mutating webhook injects the engine sidecar, a shared Unix Domain Socket, and an ephemeral RocksDB cache. The application talks to the sidecar locally over UDS; the sidecar absorbs writes at microsecond latency and asynchronously consolidates them into Parquet files committed to the Iceberg catalog (AWS Glue in production, Apache Nessie locally).
 
 ---
 
-## 🗺️ System Topology
+## 🧭 How to read this hub
 
-This diagram visualizes how the components are structurally laid out inside the Kubernetes pod boundary and how they interface with external cluster services:
+This repository is documentation-only. It answers three questions, in this order:
+
+| Lens | Question | Start here |
+|---|---|---|
+| 🎯 **Why** | What problem does this solve, who is it for, and what are the non-goals? | **[docs/why.md](docs/why.md)** |
+| 🛠️ **What** | How is it built — system architecture, components, wire protocol? | **[docs/system-overview.md](docs/system-overview.md)** |
+| 🔬 **Is it viable?** | At what throughputs and payload sizes does the engine fit in a reasonable CPU/memory envelope per pod? | **[docs/feasibility.md](docs/feasibility.md)** |
+
+If you are deciding whether to adopt the sidecar in your own application, start with **Why**. If you are implementing or reviewing the design, start with **What**. If you are deciding whether to recommend this to other teams, start with **Is it viable?**.
+
+---
+
+## 🗺️ System topology
+
+The system operates entirely within the Kubernetes pod networking boundary, ensuring zero network latency for the business application during data emission:
 
 ```mermaid
 graph TD
@@ -29,7 +45,7 @@ graph TD
     Engine -->|Catalog API| Catalog
     Engine -->|S3 Upload API| ObjectStore
     Webhook -.->|Auto-injects Sidecar & PVCs| K8sPod
-    
+
     style K8sPod fill:#f9f9f9,stroke:#333,stroke-width:2px
     style K8sCluster fill:#f5f7fa,stroke:#4a5568,stroke-width:1px
     style RocksDB fill:#e2e8f0,stroke:#4a5568,stroke-width:1px
@@ -37,62 +53,50 @@ graph TD
 
 ---
 
-## 📚 Component Repositories
+## 📚 Component repositories
 
-The system is broken down into five distinct repositories to maintain separation of concerns between platform infrastructure, library development, K8s administration, and application engineering.
+The system is broken down into six repositories along separation-of-concerns lines. Three are the runtime system (`engine`, `sdk-java`, `k8s-injector`). The other three exist to evaluate the runtime system locally before recommending it for production EKS (`local-infra`, `sandbox`, plus the load-testing spec hosted in this hub).
 
-| Component / Repository | Description | Tech Stack | Design Document |
-| :--- | :--- | :--- | :--- |
-| 🌐 **`micewriter-hub`** *(This repo)* | Central architecture, system design, and IPC protocol hub. | Markdown, Mermaid | [README.md](README.md) |
-| 🦀 **`micewriter-engine`** | Memory-safe, high-throughput Rust sidecar engine for RocksDB caching. | Rust, Tokio, RocksDB, iceberg-rust | [micewriter-engine.md](docs/micewriter-engine.md) |
-| ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot & Dropwizard) providing Netty-based Unix Domain Socket IPC. | Java, Spring Boot, Dropwizard, Netty, CBOR | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
-| ☸️ **`micewriter-k8s-injector`** | Kubernetes Mutating Webhook to automate sidecar & volume injection. | Go (k8s.io/api, k8s.io/apimachinery), TLS | [micewriter-k8s-injector.md](docs/micewriter-k8s-injector.md) |
-| 🧪 **`micewriter-sandbox`** | Reference Spring Boot microservice demonstrating end-to-end telemetry. | Spring Boot, Docker, K8s manifests | [micewriter-sandbox.md](docs/micewriter-sandbox.md) |
-| 🐳 **`micewriter-local-infra`**| Local data lake simulator packaging MinIO and Nessie Helm charts. | Helm, Kubernetes, MinIO, Nessie | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |
-
----
-
-## 🚀 Getting Started
-
-Ready to deploy the full stack? The end-to-end guide covers everything from provisioning
-the k3s cluster to verifying that Parquet files appear in MinIO after the first flush cycle:
-
-👉 **[End-to-End Deployment Guide](docs/getting-started.md)**
+| Lens | Repository | Description | Stack | Doc |
+|---|---|---|---|---|
+| 🧭 Meta | 🌐 **`micewriter-hub`** *(this repo)* | Architecture, motivation, feasibility eval — introduces all three lenses | Markdown, Mermaid | [README.md](README.md) |
+| 🛠️ What | 🦀 **`micewriter-engine`** | Memory-safe Rust sidecar managing RocksDB buffer and Iceberg commits | Rust, Tokio, RocksDB, iceberg-rust | [micewriter-engine.md](docs/micewriter-engine.md) |
+| 🛠️ What | ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot + Dropwizard) with Netty UDS transport | Java, Netty, CBOR | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
+| 🛠️ What | ☸️ **`micewriter-k8s-injector`** | Mutating Admission Webhook for auto-injection of sidecar + volumes | Go (k8s.io/api), TLS | [micewriter-k8s-injector.md](docs/micewriter-k8s-injector.md) |
+| 🔬 Viable? | 🐳 **`micewriter-local-infra`** | Local data-lake stand-in (MinIO + Nessie) on k3s | Helm, Kubernetes | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |
+| 🔬 Viable? | 🧪 **`micewriter-sandbox`** | Reference Spring Boot app driving load against the local engine | Spring Boot, Docker | [micewriter-sandbox.md](docs/micewriter-sandbox.md) |
 
 ---
 
-## 📖 Deep Dives
+## 💻 Local multi-root workspace
 
-To explore the low-level data flows, IPC protocol specifications, and background cron flush designs, proceed to the primary system documentation:
-
-👉 **[View Detailed System Overview & IPC Protocol](docs/system-overview.md)**
-
-To learn how to run SQL against your Iceberg tables using AWS Athena (cloud) or Apache Superset + Trino (local):
-
-👉 **[Querying Iceberg Tables — Athena & Superset](docs/querying.md)**
-
-To understand the load testing strategy and right-size engine sidecar CPU/memory for a given event rate and payload size:
-
-👉 **[Load Testing Specification](docs/load-testing-spec.md)**
-
----
-
-## 💻 Local Multi-Root Workspace
-
-To streamline development across all five repositories locally, a VS Code multi-root workspace file is provided. 
+To streamline development across all repositories, a VS Code multi-root workspace file is provided.
 
 1. Clone all `micewriter-` repositories into the same parent folder.
 2. Open VS Code.
 3. Select **File > Open Workspace from File...** and choose **[micewriter.code-workspace](micewriter.code-workspace)**.
 
-This will organize all five codebases into a unified explorer sidebar in your IDE.
+This organizes all codebases into a unified explorer sidebar in your IDE.
 
 ---
+
 ### 🔗 The mIceWriter Ecosystem
-* **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
-* **System Overview:** [system-overview](file:///c:/Users/marko/source/repos/micewriter-hub/docs/system-overview.md)
-* **Rust Sidecar Engine:** [micewriter-engine](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-engine.md)
-* **Java SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sdk-java.md)
-* **Kubernetes Webhook:** [micewriter-k8s-injector](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-k8s-injector.md)
-* **Local Data Lake Mock:** [micewriter-local-infra](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-local-infra.md)
-* **Reference Testing App:** [micewriter-sandbox](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sandbox.md)
+
+**🎯 Why:**
+* [Motivation & target adopter](docs/why.md)
+
+**🛠️ What:**
+* [System overview & IPC protocol](docs/system-overview.md)
+* [Rust sidecar engine](docs/micewriter-engine.md)
+* [Java SDK](docs/micewriter-sdk-java.md)
+* [Kubernetes injector](docs/micewriter-k8s-injector.md)
+
+**🔬 Is it viable?**
+* [Feasibility evaluation](docs/feasibility.md)
+* [Getting started (local deploy)](docs/getting-started.md)
+* [Local infrastructure](docs/micewriter-local-infra.md)
+* [Reference sandbox app](docs/micewriter-sandbox.md)
+* [Load testing specification](docs/load-testing-spec.md)
+
+**📊 Use:**
+* [Querying Iceberg tables](docs/querying.md)

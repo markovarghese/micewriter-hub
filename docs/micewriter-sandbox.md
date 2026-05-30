@@ -2,7 +2,10 @@
 > 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
 
 [![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
 [![Component: Testing Sandbox](https://img.shields.io/badge/Component-Testing%20Sandbox-yellow?style=flat-square)](#)
+
+> **Role in the [feasibility evaluation](feasibility.md):** stands in for "another team's application" — a Spring Boot microservice with the Java SDK wired in. Receives HTTP load on a test endpoint and emits records through UDS to the engine sidecar so resource cost can be measured under controlled traffic.
 
 This repository acts as the Reference Implementation and the primary testing ground for the entire pipeline. It simulates a standard enterprise microservice.
 
@@ -21,10 +24,22 @@ Developers can run this app locally, hit its mock endpoints with an HTTP load ge
 
 ---
 ### 🔗 The mIceWriter Ecosystem
-* **Architecture Hub:** [micewriter-hub](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
-* **System Overview:** [system-overview](file:///c:/Users/marko/source/repos/micewriter-hub/docs/system-overview.md)
-* **Rust Sidecar Engine:** [micewriter-engine](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-engine.md)
-* **Java SDK:** [micewriter-sdk-java](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sdk-java.md)
-* **Kubernetes Webhook:** [micewriter-k8s-injector](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-k8s-injector.md)
-* **Local Data Lake Mock:** [micewriter-local-infra](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-local-infra.md)
-* **Reference Testing App:** [micewriter-sandbox](file:///c:/Users/marko/source/repos/micewriter-hub/docs/micewriter-sandbox.md)
+
+**🎯 Why:**
+* [Motivation & target adopter](why.md)
+
+**🛠️ What:**
+* [System overview & IPC protocol](system-overview.md)
+* [Rust sidecar engine](micewriter-engine.md)
+* [Java SDK](micewriter-sdk-java.md)
+* [Kubernetes injector](micewriter-k8s-injector.md)
+
+**🔬 Is it viable?**
+* [Feasibility evaluation](feasibility.md)
+* [Getting started (local deploy)](getting-started.md)
+* [Local infrastructure](micewriter-local-infra.md)
+* [Reference sandbox app](micewriter-sandbox.md)
+* [Load testing specification](load-testing-spec.md)
+
+**📊 Use:**
+* [Querying Iceberg tables](querying.md)

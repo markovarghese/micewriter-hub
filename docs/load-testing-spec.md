@@ -2,7 +2,10 @@
 > 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
 [![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
+[![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
 [![Component: Load Testing](https://img.shields.io/badge/Component-Load%20Testing-orange?style=flat-square)](#)
+
+> **Role in the [feasibility evaluation](feasibility.md):** the measurement protocol. Defines the payload-size × event-rate matrix, the metrics to collect per scenario, the results template, and how the numbers feed back into the injector's default resource requests/limits.
 
 ## 1. Goal
 
@@ -253,10 +256,22 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 ---
 
 ### 🔗 The mIceWriter Ecosystem
-* **Architecture Hub:** [micewriter-hub](../README.md)
-* **System Overview:** [system-overview](system-overview.md)
-* **Rust Sidecar Engine:** [micewriter-engine](micewriter-engine.md)
-* **Java SDK:** [micewriter-sdk-java](micewriter-sdk-java.md)
-* **Kubernetes Webhook:** [micewriter-k8s-injector](micewriter-k8s-injector.md)
-* **Local Data Lake Mock:** [micewriter-local-infra](micewriter-local-infra.md)
-* **Reference Testing App:** [micewriter-sandbox](micewriter-sandbox.md)
+
+**🎯 Why:**
+* [Motivation & target adopter](why.md)
+
+**🛠️ What:**
+* [System overview & IPC protocol](system-overview.md)
+* [Rust sidecar engine](micewriter-engine.md)
+* [Java SDK](micewriter-sdk-java.md)
+* [Kubernetes injector](micewriter-k8s-injector.md)
+
+**🔬 Is it viable?**
+* [Feasibility evaluation](feasibility.md)
+* [Getting started (local deploy)](getting-started.md)
+* [Local infrastructure](micewriter-local-infra.md)
+* [Reference sandbox app](micewriter-sandbox.md)
+* [Load testing specification](load-testing-spec.md)
+
+**📊 Use:**
+* [Querying Iceberg tables](querying.md)
