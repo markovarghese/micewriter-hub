@@ -10,7 +10,7 @@ The `load-testing-spec.md` defines a 13-cell sweep across various event sizes an
 When the user asks you to run a load test sweep, follow these exact steps:
 
 ### 1. Initialize Results File
-Check if `micewriter-sandbox/load-tests/results/results.md` exists. If the file or directory does not exist, use your tools to create it.
+Check if [`micewriter-sandbox/load-tests/results/results.md`](https://github.com/markovarghese/micewriter-sandbox/blob/main/load-tests/results/results.md) exists. If the file or directory does not exist, use your tools to create it.
 The file must contain the following Markdown table header:
 ```markdown
 | Timestamp (UTC) | Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | Peak CPU | Peak Mem | OOMKill? | Notes |
@@ -81,4 +81,4 @@ For each cell, use your Grafana MCP tools to fetch the engine metrics:
 7. If a cell failed or stopped early, optionally call `query_loki_logs` to check if there was an OOMKill in that specific time window to populate the `OOMKill?` column. If no OOMKill is found, set it to `No`.
 
 ### 6. Record Results
-Append a new row to the table in `micewriter-sandbox/load-tests/results/results.md` for each scenario, fully populated with the sandbox data and the Grafana MCP data.
+Append a new row to the table in [`micewriter-sandbox/load-tests/results/results.md`](https://github.com/markovarghese/micewriter-sandbox/blob/main/load-tests/results/results.md) for each scenario, fully populated with the sandbox data and the Grafana MCP data.

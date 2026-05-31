@@ -255,7 +255,7 @@ Wait for the timer to trigger (up to 12 minutes), then confirm the following:
 > [!TIP]
 > **Automated Generation**: If you use the [`skills/run-load-test-sweep.md`](../skills/run-load-test-sweep.md) AI skill, the agent will automatically generate and populate the `results.md` file for you by directly querying the Grafana Cloud MCP server. You do not need to do this manually.
 
-After a manual sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sent/failed/p95 numbers, and pair them with Grafana Cloud screenshots or query exports for the engine-side numbers. Record one row per scenario in `micewriter-sandbox/load-tests/results/results.md`:
+After a manual sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sent/failed/p95 numbers, and pair them with Grafana Cloud screenshots or query exports for the engine-side numbers. Record one row per scenario in [`micewriter-sandbox/load-tests/results/results.md`](https://github.com/markovarghese/micewriter-sandbox/blob/main/load-tests/results/results.md):
 
 | Timestamp (UTC) | Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | Peak CPU | Peak Mem | OOMKill? | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
