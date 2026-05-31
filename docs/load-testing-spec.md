@@ -24,16 +24,19 @@ Secondary outputs:
 
 ## 2. What We Are Measuring
 
-| Metric | How Collected | Where It Lives |
-|---|---|---|
-| Engine CPU (used) | `kubectl top pod --containers` | micewriter-sandbox namespace |
-| Engine memory (used) | `kubectl top pod --containers` | micewriter-sandbox namespace |
-| RocksDB PVC utilisation | `kubectl exec ... -- df -h /var/lib/rocksdb` | Engine container |
-| Engine flush latency | Engine log lines (`flush_engine:`, `iceberg_writer:`) | Engine container logs |
-| MinIO upload throughput | MinIO Console → Metrics or S3 object sizes | `http://k8s-node-1.local:9001` |
-| SDK-side send latency | Sandbox `/events/load` response `elapsedMs / sent` | HTTP response body |
+All metrics land in **Grafana Cloud** via the Grafana Alloy DaemonSet already installed cluster-wide ([`k3sonhyperv/ansible/install-k8s-monitoring.yml`](https://github.com/Marko-MV/k3sonhyperv/blob/main/ansible/install-k8s-monitoring.yml)). cAdvisor provides container CPU/memory automatically; pod logs ship to Loki; application-level Prometheus endpoints are scraped via `prometheus.io/scrape` annotations.
 
-The metrics that feed the sizing decision are **engine CPU** and **engine memory**. All others are diagnostic.
+| Metric | Source | Query |
+|---|---|---|
+| Engine CPU (used) | cAdvisor → Grafana Cloud | `rate(container_cpu_usage_seconds_total{namespace="micewriter-sandbox", container="micewriter-engine"}[1m])` |
+| Engine memory (used) | cAdvisor → Grafana Cloud | `container_memory_working_set_bytes{namespace="micewriter-sandbox", container="micewriter-engine"}` |
+| RocksDB PVC utilisation | kubelet → Grafana Cloud | `kubelet_volume_stats_used_bytes{persistentvolumeclaim=~"rocksdb-.*"}` |
+| Engine flush latency | Engine logs → Loki | LogQL: `{namespace="micewriter-sandbox", container="micewriter-engine"} \|~ "rotating column family\|Table flushed"` — measure the wall-clock gap between rotation and commit |
+| MinIO throughput / errors | MinIO Prometheus endpoint → Grafana Cloud | `rate(minio_s3_traffic_received_bytes_total[1m])`, `rate(minio_s3_requests_errors_total[1m])` |
+| Nessie commit latency | Nessie Quarkus metrics → Grafana Cloud | `histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri=~".*iceberg.*"}[1m]))` |
+| Sandbox send rate / latency / errors | Micrometer → Grafana Cloud | `rate(micewriter_loadtest_events_sent_total[1m])`, `micewriter_loadtest_send_seconds` histogram |
+
+The metrics that feed the sizing decision are **engine CPU** and **engine memory**. The MinIO / Nessie / latency metrics are diagnostic — used in §5.4 to validate that any "engine OOMKill" result wasn't caused by an upstream slowdown.
 
 ---
 
@@ -98,98 +101,110 @@ Expected: log line `uds_server: listening on /var/run/app/iceberg.sock`.
 
 ## 5. Running a Test Scenario
 
-### 5.1 Choose a tool
+The sandbox application itself drives load through its in-process SDK call path — no external client (k6, jmeter, hey) needed. This removes the HTTP-server hop that an external generator would add, which matters because the SDK's `send()` is serialized through a single Netty event loop lock and concurrent HTTP clients would just queue behind it without buying any parallelism.
 
-The sandbox's built-in `/events/load?count=N` endpoint sends events as fast as possible with a hardcoded ~20-byte payload. It is not suitable for parametric load testing. Use **[k6](https://k6.io)** instead — it controls both rate and payload size precisely.
+The endpoints are:
 
-### 5.2 k6 script
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/loadtest/start` | Run one cell of the matrix |
+| POST | `/loadtest/sweep` | Walk multiple cells sequentially |
+| GET | `/loadtest/{runId}` | Live status with per-cell counters and latency percentiles |
+| GET | `/loadtest` | List recent runs |
+| POST | `/loadtest/{runId}/stop` | Cancel an active run |
 
-Save this as `micewriter-sandbox/load-tests/engine-sizing.js`:
+Only one run can be active at a time (the endpoint returns 409 if you try to start a second). The sandbox keeps the last 32 runs in memory for status lookup.
 
-```javascript
-import http from 'k6/http';
-import { check } from 'k6';
-
-// Parameters — override via k6 -e flags:
-//   k6 run -e RATE=10 -e PAYLOAD_KB=100 -e DURATION=15m engine-sizing.js
-const RATE       = parseInt(__ENV.RATE       || '10');     // events/sec
-const PAYLOAD_KB = parseInt(__ENV.PAYLOAD_KB || '1');      // 1, 100, 1024, 10240
-const DURATION   = __ENV.DURATION || '15m';
-const TARGET     = __ENV.TARGET   || 'http://k8s-node-1.local';
-
-export const options = {
-  scenarios: {
-    constant_rate: {
-      executor: 'constant-arrival-rate',
-      rate: RATE,
-      timeUnit: '1s',
-      duration: DURATION,
-      preAllocatedVUs: Math.max(RATE, 10),
-      maxVUs: Math.max(RATE * 2, 50),
-    },
-  },
-  thresholds: {
-    http_req_failed: ['rate<0.01'],   // <1% errors
-  },
-};
-
-// Generate a payload of exactly PAYLOAD_KB kilobytes
-const payload = JSON.stringify({
-  source: 'load-test',
-  payload: 'x'.repeat(PAYLOAD_KB * 1024),
-  severity: 1,
-});
-
-export default function () {
-  const res = http.post(`${TARGET}/events`, payload, {
-    headers: { 'Content-Type': 'application/json' },
-  });
-  check(res, { 'status 200': (r) => r.status === 200 });
-}
-```
-
-### 5.3 Run a scenario
+### 5.1 Single scenario
 
 Example: 100 KB events at 10/sec for 15 minutes:
 
 ```powershell
-k6 run -e RATE=10 -e PAYLOAD_KB=100 -e DURATION=15m `
-  micewriter-sandbox/load-tests/engine-sizing.js
+curl -X POST http://k8s-node-1.local/loadtest/start `
+     -H 'Content-Type: application/json' `
+     -d '{"rate":10,"payloadSizeBytes":102400,"durationSec":900}'
+# → { "runId": "...", "status": "RUNNING" }
 ```
 
-### 5.4 Collect metrics during the run
+### 5.2 Full matrix sweep
 
-In a separate terminal, poll resource usage every 30 seconds for the duration of the test:
+Walk the 13 non-skip cells of the §3 matrix in one go, with a 60-second rest between cells so RocksDB can drain:
 
 ```powershell
-while ($true) {
-    $ts = Get-Date -Format "HH:mm:ss"
-    Write-Host "[$ts]"
-    kubectl top pod -n micewriter-sandbox --containers
-    kubectl exec -n micewriter-sandbox `
-        deploy/micewriter-sandbox -c micewriter-engine `
-        -- df -h /var/lib/rocksdb
-    Start-Sleep 30
+curl -X POST http://k8s-node-1.local/loadtest/sweep `
+     -H 'Content-Type: application/json' `
+     -d @- <<'JSON'
+{
+  "restSecondsBetween": 60,
+  "cells": [
+    {"rate":1,   "payloadSizeBytes":1024,     "durationSec":900},
+    {"rate":1,   "payloadSizeBytes":102400,   "durationSec":900},
+    {"rate":1,   "payloadSizeBytes":1048576,  "durationSec":900},
+    {"rate":1,   "payloadSizeBytes":10485760, "durationSec":900},
+    {"rate":10,  "payloadSizeBytes":1024,     "durationSec":900},
+    {"rate":10,  "payloadSizeBytes":102400,   "durationSec":900},
+    {"rate":10,  "payloadSizeBytes":1048576,  "durationSec":900},
+    {"rate":10,  "payloadSizeBytes":10485760, "durationSec":900},
+    {"rate":100, "payloadSizeBytes":1024,     "durationSec":900},
+    {"rate":100, "payloadSizeBytes":102400,   "durationSec":900},
+    {"rate":100, "payloadSizeBytes":1048576,  "durationSec":900},
+    {"rate":500, "payloadSizeBytes":1024,     "durationSec":900},
+    {"rate":500, "payloadSizeBytes":102400,   "durationSec":900}
+  ]
+}
+JSON
+```
+
+The full sweep takes ~3.5 hours (13 × 15 min + 12 × 60 s rest). Run it overnight.
+
+### 5.3 Watch progress
+
+```powershell
+curl http://k8s-node-1.local/loadtest/<runId>
+```
+
+Returns JSON like:
+
+```json
+{
+  "runId": "...",
+  "kind": "SWEEP",
+  "status": "RUNNING",
+  "activeCellIndex": 4,
+  "totalSent": 6234,
+  "totalFailed": 0,
+  "cells": [
+    { "rate": 1, "payloadSizeBytes": 1024, "sent": 900, "failed": 0,
+      "achievedRate": 1.00, "p50LatMs": 0.8, "p95LatMs": 1.4, ... },
+    ...
+  ]
 }
 ```
 
-Redirect output to a file per scenario:
+Or watch it in Grafana Cloud:
 
-```powershell
-.\collect-metrics.ps1 2>&1 | Tee-Object -FilePath "results/scenario-10rate-100kb.txt"
+```promql
+rate(micewriter_loadtest_events_sent_total{namespace="micewriter-sandbox"}[1m])
+histogram_quantile(0.95, rate(micewriter_loadtest_send_seconds_bucket[1m]))
 ```
 
-### 5.5 Capture engine flush logs
+### 5.4 Bottleneck triage queries
 
-Stream engine logs to a separate file during the test to record flush timing:
+If a scenario shows the engine OOMKilling, **verify the engine itself is the bottleneck** before treating that as a sizing data point. Run these queries against the same time window:
 
-```powershell
-kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox `
-    -c micewriter-engine --follow `
-    | Tee-Object -FilePath "results/engine-logs-10rate-100kb.txt"
-```
+| Question | Query |
+|---|---|
+| Is MinIO CPU-throttled? | `rate(container_cpu_cfs_throttled_seconds_total{pod=~"micewriter-minio.*"}[1m]) > 0` |
+| Is MinIO returning errors? | `rate(minio_s3_requests_errors_total[1m]) > 0` |
+| Is MinIO's request queue backing up? | `minio_s3_requests_inflight` (any non-zero floor under flush) |
+| Is Nessie CPU-throttled? | `rate(container_cpu_cfs_throttled_seconds_total{pod=~"micewriter-nessie.*"}[1m]) > 0` |
+| Is Nessie's commit slow? | `histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri=~".*iceberg.*"}[1m]))` |
+| Is the engine sidecar memory near limit? | `container_memory_working_set_bytes{container="micewriter-engine"} / 1024 / 1024` (compare against 512) |
+| Is the engine flush hanging? | LogQL: `{container="micewriter-engine"} \|~ "rotating column family\|commit succeeded"` and eyeball the time gap |
 
-### 5.6 Force a flush at end of test (optional)
+An "engine OOMKilled at 512 Mi" result is only trustworthy if (a) MinIO and Nessie throttle queries are zero in the same window, and (b) the engine pod's memory was actually climbing on its own rather than stalling while waiting on a slow flush partner.
+
+### 5.5 Force a flush at end of test (optional)
 
 If you don't want to wait for the 10-minute jitter window, trigger a manual flush immediately after the load generator finishes. `ENABLE_MANUAL_FLUSH=true` is set by default in the local injector values:
 
@@ -201,7 +216,7 @@ curl -X POST http://k8s-node-1.local/events/flush
 
 ## 6. Results Template
 
-Record one row per scenario in `micewriter-sandbox/load-tests/results/results.md`:
+After a sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sent/failed/p95 numbers, and pair them with Grafana Cloud screenshots or query exports for the engine-side numbers. Record one row per scenario in `micewriter-sandbox/load-tests/results/results.md`:
 
 | Scenario | Event size | Rate (ev/s) | Duration | Peak CPU (engine) | Avg CPU (engine) | Peak Mem (engine) | RocksDB peak | Flush latency | OOMKill? | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -209,9 +224,9 @@ Record one row per scenario in `micewriter-sandbox/load-tests/results/results.md
 | 2 | 100 KB | 1 | 15 min | | | | | | | |
 | … | | | | | | | | | | |
 
-**Peak CPU** = highest single sample from `kubectl top`.  
-**Peak Mem** = highest single sample.  
-**Flush latency** = elapsed ms between `flush_engine: rotating column family` and `iceberg_writer: commit succeeded` in engine logs.
+**Peak CPU** = `max_over_time(rate(container_cpu_usage_seconds_total{container="micewriter-engine"}[1m])[15m:])`.  
+**Peak Mem** = `max_over_time(container_memory_working_set_bytes{container="micewriter-engine"}[15m:])`.  
+**Flush latency** = wall-clock between `rotating column family` and `Table flushed` in the engine logs (Loki query in §2).
 
 ---
 
@@ -248,10 +263,9 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 
 | Gap | Impact | Suggested fix |
 |---|---|---|
-| `/events/load` has no `payloadSizeBytes` or `rate` parameter | Cannot drive parametric tests from the sandbox alone | Use k6 as described above, or add `payloadSizeBytes` and `ratePerSec` params to `TelemetryController.loadTest()` |
-| No automated metrics collection | Results must be captured manually | Add a PowerShell `collect-metrics.ps1` helper script to `micewriter-sandbox/load-tests/` |
-| `kubectl top` has ~15s resolution | Peak CPU/memory between samples is invisible | For finer-grained data, deploy the k3s Metrics Server and scrape via Prometheus, or use `kubectl top --watch` piped to a file |
 | Sandbox `TelemetryEvent.payload` is a `String` | 10 MB string payloads are valid Java but test a different serialization path than real binary tensor payloads | Acceptable for initial sizing; revisit when binary payloads are introduced |
+| Single-replica only | Catalog contention from concurrent commits across many engine sidecars is not exercised | Phase-2 follow-up: scale the sandbox Deployment to 2–3 replicas (lifting the k8s-node-3 nodeSelector) and re-run one or two cells. See [feasibility.md §4](feasibility.md) for what the local setup does and does not measure. |
+| Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, CBOR decode latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and inject the corresponding scrape annotations via the k8s-injector webhook. |
 
 ---
 

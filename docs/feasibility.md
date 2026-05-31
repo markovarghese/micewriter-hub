@@ -43,7 +43,7 @@ Three sibling repositories combine to form one end-to-end evaluation flow:
 |---|---|
 | **[micewriter-local-infra](micewriter-local-infra.md)** | Stands up MinIO + Nessie on a local k3s cluster — the S3 + Glue stand-in. Without this, the engine sidecar has no catalog to commit to and no object store to upload to. |
 | **[micewriter-sandbox](micewriter-sandbox.md)** | A reference Spring Boot application with the SDK wired in. Receives HTTP traffic on a load-test endpoint and emits records through the SDK over UDS. Stands in for "another team's application." |
-| **[Load Testing Specification](load-testing-spec.md)** | Defines the test matrix (payload size × event rate × duration), the metrics to collect, the results template, and how measurements feed back into the injector's default resource requests/limits. |
+| **[Load Testing Specification](load-testing-spec.md)** | Defines the test matrix (payload size × event rate × duration), the Grafana Cloud queries used to collect engine + MinIO + Nessie metrics, the results template, and how measurements feed back into the injector's default resource requests/limits. Load is driven by `/loadtest/*` endpoints on the sandbox itself (no external load tool). |
 
 The end-to-end deployment flow that ties them together is documented in [getting-started.md](getting-started.md).
 
