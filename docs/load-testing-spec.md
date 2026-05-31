@@ -218,6 +218,33 @@ If you don't want to wait for the 10-minute jitter window, trigger a manual flus
 curl -X POST http://k8s-node-1.local/events/flush
 ```
 
+### 5.6 Verify timer flush
+
+To verify the engine's natural timer-driven flush cycle (10 min ± 2 min jittered) operates correctly without manual intervention, run a single scenario for 15 minutes (`durationSec=900`) at a modest rate:
+
+```powershell
+curl -X POST http://k8s-node-1.local/loadtest/start `
+     -H 'Content-Type: application/json' `
+     -d '{"rate":10,"payloadSizeBytes":10240,"durationSec":900}'
+```
+
+Wait for the timer to trigger (up to 12 minutes), then confirm the following:
+
+1. **Flush log sequence**: Look for the timer trigger followed by a successful commit:
+   ```powershell
+   kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine
+   ```
+   Expected logs:
+   ```
+   Timer triggered flush
+   Starting flush cycle
+   Column family rotated frozen=active
+   ...
+   Iceberg commit successful table=telemetry_events
+   ```
+2. **No retries**: Ensure there are no 404 or retry loops in the engine logs during this commit.
+3. **Row counts**: Confirm the row count in the resulting MinIO Parquet files matches the sandbox `totalSent` minus any rows in the next active CF.
+
 ---
 
 ## 6. Results Template
