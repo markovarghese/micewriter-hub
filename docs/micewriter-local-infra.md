@@ -25,12 +25,12 @@ Provides a 1-click local testing environment for developers to test the full pip
 ## 🚀 Commands
 
 ```powershell
-.\run.ps1 up          # Deploy core infra: cert-manager, registry, MinIO, Nessie
-.\run.ps1 down        # Uninstall MinIO + Nessie (keeps namespace and PVCs)
-.\run.ps1 clean       # Full teardown — purges namespace and all PVCs
-.\run.ps1 status      # Show pod status in micewriter-infra namespace
-.\run.ps1 query-up    # Deploy optional query stack: Trino + Superset
-.\run.ps1 query-down  # Tear down Trino + Superset
+powershell -ExecutionPolicy Bypass -File .\run.ps1 up          # Deploy core infra: cert-manager, registry, MinIO, Nessie
+powershell -ExecutionPolicy Bypass -File .\run.ps1 down        # Uninstall MinIO + Nessie (keeps namespace and PVCs)
+powershell -ExecutionPolicy Bypass -File .\run.ps1 clean       # Full teardown — purges namespace and all PVCs
+powershell -ExecutionPolicy Bypass -File .\run.ps1 status      # Show pod status in micewriter-infra namespace
+powershell -ExecutionPolicy Bypass -File .\run.ps1 query-up    # Deploy optional query stack: Trino + Superset
+powershell -ExecutionPolicy Bypass -File .\run.ps1 query-down  # Tear down Trino + Superset
 ```
 
 ## 📦 Output Artifact

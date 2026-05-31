@@ -19,6 +19,7 @@ cluster provisioned by [k3sonhyperv](https://github.com/markovarghese/k3sonhyper
 | `$HOME/.kube/config` exists | Produced automatically by `install-k3s.yml` (moved from repository) |
 | Docker Desktop running | Start from the system tray |
 | All micewriter repos cloned | Clone each sibling repo into the same parent folder |
+| PowerShell Execution Policy | Ensure scripts are permitted (e.g. `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`) |
 
 ---
 
