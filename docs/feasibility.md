@@ -47,6 +47,8 @@ Three sibling repositories combine to form one end-to-end evaluation flow:
 
 The end-to-end deployment flow that ties them together is documented in [getting-started.md](getting-started.md).
 
+**Integration Assumptions**: Beyond performance, the local stack also validates version compatibility. Every component in the data plane (sandbox SDK → engine → Nessie → MinIO) needs to be at a version compatible with the engine's `iceberg-rust` client expectations. This is the kind of integration assumption the local stack is supposed to validate before recommending the system to other EKS teams.
+
 ---
 
 ## 4. How production maps to local

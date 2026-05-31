@@ -72,6 +72,12 @@ Scenarios marked `skip` are expected to exceed the engine's memory limit given t
 
 All infra must be up before running any scenario:
 
+- The Nessie chart must be ≥ 0.107 with `catalog.enabled: true` and an Iceberg warehouse + S3 storage block configured.
+- Verify with: `curl -sI http://k8s-node-1.local:19120/iceberg/v1/config` — expect 200, not 404.
+
+If 404, the engine's flush will fail silently for an entire flush window and could OOM the sidecar under sustained load (real failure mode observed; see markovarghese/micewriter-engine#1).
+
+
 ```powershell
 # From micewriter-local-infra
 .\run.ps1 up          # MinIO + Nessie
