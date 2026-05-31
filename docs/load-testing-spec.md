@@ -134,6 +134,9 @@ curl -X POST http://k8s-node-1.local/loadtest/start `
 
 ### 5.2 Full matrix sweep
 
+> [!TIP]
+> **Automated Execution**: You do not need to run this manually! Use the AI skill located at [`skills/run-load-test-sweep.md`](../skills/run-load-test-sweep.md). Simply ask an AI agent connected to the Grafana MCP server to "Use your skill to run the load test sweep", and it will handle execution, monitoring, and populating the results automatically.
+
 Walk the 13 non-skip cells of the §3 matrix in one go, with a 60-second rest between cells so RocksDB can drain:
 
 ```powershell
@@ -249,7 +252,10 @@ Wait for the timer to trigger (up to 12 minutes), then confirm the following:
 
 ## 6. Results Template
 
-After a sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sent/failed/p95 numbers, and pair them with Grafana Cloud screenshots or query exports for the engine-side numbers. Record one row per scenario in `micewriter-sandbox/load-tests/results/results.md`:
+> [!TIP]
+> **Automated Generation**: If you use the [`skills/run-load-test-sweep.md`](../skills/run-load-test-sweep.md) AI skill, the agent will automatically generate and populate the `results.md` file for you by directly querying the Grafana Cloud MCP server. You do not need to do this manually.
+
+After a manual sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sent/failed/p95 numbers, and pair them with Grafana Cloud screenshots or query exports for the engine-side numbers. Record one row per scenario in `micewriter-sandbox/load-tests/results/results.md`:
 
 | Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | OOMKill? | Notes |
 |---|---|---|---|---|---|---|---|---|
