@@ -19,7 +19,6 @@ cluster provisioned by [k3sonhyperv](https://github.com/markovarghese/k3sonhyper
 | `$HOME/.kube/config` exists | Produced automatically by `install-k3s.yml` (moved from repository) |
 | Docker Desktop running | Start from the system tray |
 | All micewriter repos cloned | Clone each sibling repo into the same parent folder |
-| PowerShell Execution Policy | Ensure scripts are permitted (e.g. `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`) |
 
 ---
 
@@ -43,7 +42,7 @@ This is required so `docker push` can reach the HTTP registry running inside k3s
 From the `k3sonhyperv` directory:
 
 ```powershell
-.\run-ansible.ps1 -Playbook install-local-registry.yml
+powershell -ExecutionPolicy Bypass -File .\run-ansible.ps1 -Playbook install-local-registry.yml
 ```
 
 This writes `/etc/rancher/k3s/registries.yaml` on all three nodes and restarts k3s so
@@ -56,7 +55,7 @@ containerd can pull images from `k8s-node-1.local:5000` over plain HTTP.
 From the `micewriter-local-infra` directory:
 
 ```powershell
-.\run.ps1 up
+powershell -ExecutionPolicy Bypass -File .\run.ps1 up
 ```
 
 This single command installs, in order:
@@ -71,7 +70,7 @@ This single command installs, in order:
 Verify everything is healthy:
 
 ```powershell
-.\run.ps1 status
+powershell -ExecutionPolicy Bypass -File .\run.ps1 status
 ```
 
 Expected endpoints once ready:
@@ -91,7 +90,7 @@ Expected endpoints once ready:
 From the `micewriter-engine` directory:
 
 ```powershell
-.\push.ps1
+powershell -ExecutionPolicy Bypass -File .\push.ps1
 ```
 
 This builds the Rust sidecar Docker image and pushes it to the local registry. The
@@ -106,10 +105,10 @@ From the `micewriter-k8s-injector` directory:
 
 ```powershell
 # Build and push the webhook image
-.\run.ps1 push
+powershell -ExecutionPolicy Bypass -File .\run.ps1 push
 
 # Deploy the Helm chart (cert-manager must be ready from Step 3)
-.\run.ps1 deploy
+powershell -ExecutionPolicy Bypass -File .\run.ps1 deploy
 ```
 
 > If `deploy` fails with "no kind Issuer", wait ~10 seconds and retry. cert-manager CRDs
@@ -126,7 +125,7 @@ sidecar, the shared UDS socket volume, and a RocksDB PVC.
 From the `micewriter-sandbox` directory:
 
 ```powershell
-.\run.ps1 deploy
+powershell -ExecutionPolicy Bypass -File .\run.ps1 deploy
 ```
 
 This builds the Spring Boot image (using the parent directory as Docker build context so
@@ -192,18 +191,18 @@ Once the engine has completed its first flush cycle (watch for `iceberg_writer: 
 ```powershell
 # Undeploy the sandbox app
 # (from micewriter-sandbox)
-.\run.ps1 undeploy
+powershell -ExecutionPolicy Bypass -File .\run.ps1 undeploy
 
 # Undeploy the webhook
 # (from micewriter-k8s-injector)
-.\run.ps1 undeploy
+powershell -ExecutionPolicy Bypass -File .\run.ps1 undeploy
 
 # Tear down infrastructure (keeps PVCs — MinIO data survives)
 # (from micewriter-local-infra)
-.\run.ps1 down
+powershell -ExecutionPolicy Bypass -File .\run.ps1 down
 
 # Full reset — purges the namespace and all PVCs
-.\run.ps1 clean
+powershell -ExecutionPolicy Bypass -File .\run.ps1 clean
 ```
 
 ---
@@ -212,10 +211,10 @@ Once the engine has completed its first flush cycle (watch for `iceberg_writer: 
 
 | What changed | Command |
 |---|---|
-| Engine Rust source | `.\push.ps1` in `micewriter-engine`, then restart the sandbox pod |
-| Webhook Go source | `.\run.ps1 push` + `.\run.ps1 deploy` in `micewriter-k8s-injector` |
-| Sandbox Java source | `.\run.ps1 deploy` in `micewriter-sandbox` (re-builds and re-pushes) |
-| Infrastructure values | `.\run.ps1 up` in `micewriter-local-infra` (Helm upgrade is idempotent) |
+| Engine Rust source | `powershell -ExecutionPolicy Bypass -File .\push.ps1` in `micewriter-engine`, then restart the sandbox pod |
+| Webhook Go source | `powershell -ExecutionPolicy Bypass -File .\run.ps1 push` + `powershell -ExecutionPolicy Bypass -File .\run.ps1 deploy` in `micewriter-k8s-injector` |
+| Sandbox Java source | `powershell -ExecutionPolicy Bypass -File .\run.ps1 deploy` in `micewriter-sandbox` (re-builds and re-pushes) |
+| Infrastructure values | `powershell -ExecutionPolicy Bypass -File .\run.ps1 up` in `micewriter-local-infra` (Helm upgrade is idempotent) |
 
 ---
 
