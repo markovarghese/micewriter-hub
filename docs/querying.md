@@ -7,7 +7,7 @@
 
 Once the mIceWriter engine has completed its first flush cycle, the Iceberg table is registered in the catalog and its Parquet files are in object storage — ready for SQL queries. This guide covers two paths depending on your environment.
 
-> **Latency note:** Data becomes queryable ~10 minutes after ingestion, once the jittered flush cycle completes and the Iceberg snapshot is committed to the catalog.
+> **Latency note:** Data becomes queryable ~10 minutes (or 192 MB) after ingestion, once the flush cycle completes and the Iceberg snapshot is committed to the catalog.
 
 ---
 

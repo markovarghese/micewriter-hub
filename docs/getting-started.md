@@ -152,7 +152,7 @@ curl -X POST "http://k8s-node-1.local/events/load?count=1000"
 
 ### Watch the engine flush
 
-The sidecar flushes every ~10 minutes (jittered). Stream its logs to watch:
+The sidecar flushes every ~10 minutes or when 192 MB of data is accumulated. Stream its logs to watch:
 
 ```powershell
 kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine --follow
