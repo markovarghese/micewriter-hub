@@ -218,11 +218,14 @@ curl -X POST http://k8s-node-1.local/events/flush
 
 After a sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sent/failed/p95 numbers, and pair them with Grafana Cloud screenshots or query exports for the engine-side numbers. Record one row per scenario in `micewriter-sandbox/load-tests/results/results.md`:
 
-| Scenario | Event size | Rate (ev/s) | Duration | Peak CPU (engine) | Avg CPU (engine) | Peak Mem (engine) | RocksDB peak | Flush latency | OOMKill? | Notes |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | 1 KB | 1 | 15 min | | | | | | No | |
-| 2 | 100 KB | 1 | 15 min | | | | | | | |
-| … | | | | | | | | | | |
+| Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | OOMKill? | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 1 KB | 10 | 5 min | 11.9 ms | 10.0 / s | 0 / 3002 | No | First validated scenario; engine sidecar at default 512 Mi limits |
+| 2 | 100 KB | 10 | 5 min | 12.0 ms | 10.0 / s | 0 / 3002 | No | 100× payload, same latency — confirms CBOR+UDS scales linearly through this range |
+| 3 | 10 KB | 100 | 5 min | — | 70.6 / s | 8838 / 30007 (29.5%) | **Yes** | **Failure not from sizing.** Engine OOMKilled at 05:12:55 because Nessie 0.69 returned 404 on every flush → RocksDB accumulated unflushable backlog → 512 Mi limit hit. After Nessie chart was upgraded to 0.107.6 (see [`micewriter-local-infra@9f4c7c6`](https://github.com/markovarghese/micewriter-local-infra/commit/9f4c7c6)) and a fresh sandbox pod was deployed, the 10 KB × 100/s scenario should be re-run. |
+| 4 | 1 MB | 10 | 5 min | — | 0 / s | 3002 / 3002 (100%) | (engine already dead) | Cascade from scenario 3. Engine container had restarted after the OOMKill, but the SDK's UdsConnection did not reconnect; every send timed out at the 5 s ACK timeout. Tracked: [`micewriter-sdk-java#1`](https://github.com/markovarghese/micewriter-sdk-java/issues/1). |
+
+Engine CPU/Mem/RocksDB/flush-latency columns are populated from Grafana Cloud queries (see §2) once the corresponding cells have been re-run against the fixed Nessie. Scenarios 1 and 2 are clean baseline; 3 and 4 need re-execution before they constitute real sizing data.
 
 **Peak CPU** = `max_over_time(rate(container_cpu_usage_seconds_total{container="micewriter-engine"}[1m])[15m:])`.  
 **Peak Mem** = `max_over_time(container_memory_working_set_bytes{container="micewriter-engine"}[15m:])`.  
