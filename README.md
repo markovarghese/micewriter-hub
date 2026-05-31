@@ -96,7 +96,7 @@ This organizes all codebases into a unified explorer sidebar in your IDE.
 * [Getting started (local deploy)](docs/getting-started.md)
 * [Local infrastructure](docs/micewriter-local-infra.md)
 * [Reference sandbox app](docs/micewriter-sandbox.md)
-* [Load testing specification](docs/load-testing-spec.md)
+* [Load testing specification](docs/load-testing-spec.md) — driven by the sandbox's `/loadtest/{start,sweep,{runId},{runId}/stop}` endpoints ([reference](../micewriter-sandbox/README.md#loadtest--in-process-load-generator))
 
 **📊 Use:**
 * [Querying Iceberg tables](docs/querying.md)
