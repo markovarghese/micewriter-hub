@@ -35,10 +35,10 @@ sequenceDiagram
     Engine->>RocksDB: Async zero-copy append to active Column Family
     Engine-->>SDK: Acknowledge IPC response
 
-    Note over Engine,ObjectStore: Jittered 10-Minute Flush Cycle
-    Engine->>Engine: Jitter timer fires, rotate RocksDB Column Family
+    Note over Engine,ObjectStore: Hybrid Flush Cycle (10 Min or 32 MB)
+    Engine->>Engine: Jitter timer fires OR size limit reached, rotate RocksDB Column Family
     Engine->>RocksDB: Read frozen Column Family records
-    Engine->>Engine: Parse CBOR & compile to Parquet batches
+    Engine->>Engine: Parse CBOR → NDJSON → Arrow → Parquet
     Engine->>ObjectStore: Upload Parquet files (S3 API)
     Engine->>Catalog: Atomic commit append to Iceberg Table
     Engine->>RocksDB: Purge frozen Column Family
@@ -55,14 +55,16 @@ All IPC messages use a standard 4-byte big-endian length prefix framing protocol
 
 ### 2.2 Serialization
 - **Schemas:** Handshake messages (`REGISTER_SCHEMA`) are sent as JSON.
-- **Telemetry Records:** Hot-path ingestion records (`INGEST_RECORD`) are streamed as native **CBOR (Concise Binary Object Representation)** bytes. This dynamic binary format eliminates the Arrow schema repetition on every row, keeping the SDK entirely memory-free, while natively supporting large binary tensor arrays without Base64 overhead. The payload size is capped at 128 MB to prevent OOM attacks.
+- **Telemetry Records:** Hot-path ingestion records (`INGEST_RECORD`) are streamed as native **CBOR** bytes. This dynamic binary format eliminates the Arrow schema repetition on every row, keeping the SDK entirely stateless and memory-free. 
+- **The Engine Pipeline (`CBOR → NDJSON → Arrow → Parquet`):** Because there is no official, battle-tested `arrow-cbor` parser in the Apache Arrow ecosystem, the engine safely transpiles the CBOR into NDJSON strings just-in-time, then leverages the official `arrow-json` parser to rigorously enforce Iceberg schemas and manage complex nested memory (validity bitmaps, nested lists, etc.).
+- **Payload Limits:** The payload size is hard-capped at **16 MB** by both the SDK and the engine to prevent OOM attacks. A 16 MB monolithic array of floats can easily expand into a 200+ MB `serde_json::Value` DOM tree in Rust, which would threaten the sidecar's rigid 512 MiB memory boundary.
 
 ## 3. The Flush Cycle & Graceful Shutdown
 
 To consolidate small records into optimized Iceberg v3 Parquet files while protecting the Catalog API from rate limits (the "Thundering Herd" problem):
 
-- **Jittered Column Family Swap:** The Rust cron thread wakes up on a randomized (jittered) schedule (e.g., 10 minutes ± 2 minutes). It swaps incoming traffic to a new RocksDB Column Family, freezing the old one.
-- **Compilation:** The frozen CBOR records are decoded, dynamically cast using the Iceberg schema, and compiled into Parquet file batches. Note: The engine performs fast, append-only operations; Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs.
+- **Hybrid Time/Size Column Family Swap:** The sidecar rotates the active RocksDB Column Family and freezes it for compilation either on a jittered schedule (e.g., 10 minutes ± 2 minutes) OR immediately if the uncompressed data exceeds 32 MB. The 32 MB flush limit ensures the final compiled Parquet bytes held in memory never exceed ~15 MB, safeguarding the 512 MiB container limit.
+- **Compilation:** The frozen CBOR records are decoded into NDJSON, dynamically cast using the Iceberg schema via `arrow-json`, and compiled into Parquet file batches. Note: The engine performs fast, append-only operations; Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs.
 - **Catalog Commit:** The sidecar uploads files to S3 (MinIO or AWS S3) and executes an atomic commit to the configured catalog (Nessie or AWS Glue). On `CommitFailedException` (optimistic locking failure), it uses an exponential backoff retry.
 - **SIGTERM Emergency Flush:** If Kubernetes initiates pod termination, the sidecar intercepts the `SIGTERM` signal, pauses new ingestion, forces an immediate compilation/commit of remaining RocksDB data, and exits safely.
 - **Manual Flush (Testing Only):** In non-production environments, the injector configures `ENABLE_MANUAL_FLUSH=true`, exposing an IPC command to manually force a flush. This enables end-to-end integration tests while remaining disabled in production to protect the Catalog from API abuse.
@@ -72,7 +74,7 @@ To consolidate small records into optimized Iceberg v3 Parquet files while prote
 This architecture intentionally abstracts away **read-after-write** capabilities from the emitting Spring Boot application. The system is fundamentally split into two optimized domains:
 
 1. **Write Optimization:** The application achieves microsecond write latency via UDS and local RocksDB caching, completely insulated from cloud API latency.
-2. **Read Optimization:** Distributed query engines (e.g., **Trino, Apache Superset, Athena, Spark**) require large, columnar files to execute analytical queries efficiently. By delaying the Iceberg catalog commit until the sidecar has compiled 10 minutes worth of telemetry into large Parquet files, downstream analytics platforms are saved from the catastrophic performance degradation of scanning millions of tiny S3 files.
+2. **Read Optimization:** Distributed query engines (e.g., **Trino, Apache Superset, Athena, Spark**) require large, columnar files to execute analytical queries efficiently. By delaying the Iceberg catalog commit until the sidecar has compiled ~10 minutes (or 32 MB) worth of telemetry into larger Parquet files, downstream analytics platforms are saved from the catastrophic performance degradation of scanning millions of tiny S3 files.
 
 ---
 ### 🔗 The mIceWriter Ecosystem
