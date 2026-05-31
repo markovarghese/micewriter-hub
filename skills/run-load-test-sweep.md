@@ -13,7 +13,7 @@ When the user asks you to run a load test sweep, follow these exact steps:
 Check if `micewriter-sandbox/load-tests/results/results.md` exists. If the file or directory does not exist, use your tools to create it.
 The file must contain the following Markdown table header:
 ```markdown
-| Date | Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | Peak CPU | Peak Mem | OOMKill? | Notes |
+| Timestamp (UTC) | Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | Peak CPU | Peak Mem | OOMKill? | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 ```
 
