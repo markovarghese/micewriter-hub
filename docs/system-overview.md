@@ -5,76 +5,102 @@
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: System Overview](https://img.shields.io/badge/Component-System%20Overview-lightgrey?style=flat-square)](#)
 
-This document outlines the core architecture and data flows for the distributed mIceWriter telemetry ingestion pipeline.
+This document outlines the core architecture and data flows for the mIceWriter telemetry ingestion pipeline as of **v2: per-table engine pipelines**. For the v1 sidecar variant the system started from, check out the `v1.0.0` tag on every `micewriter-*` repo — and see [v1-to-v2-migration.md](v1-to-v2-migration.md) for the pivot rationale.
 
 ## 1. Global Architecture & Topology
 
-The system operates entirely within the Kubernetes pod networking boundary, ensuring zero network latency for the business application during data emission. The architecture uses a sidecar pattern to decouple the application JVM from storage operations.
+v2 replaces the v1 per-pod sidecar with **one engine `Deployment` + `Service` per Iceberg table**. The Java SDK routes each `send(pojo)` to the correct pipeline using the existing `@IcebergEntity(table = "...")` annotation. Pipelines are independent: HPA, resource sizing, and catalog commits are scoped per table.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant App as Java App (Spring Boot / Dropwizard)
     participant SDK as mIceWriter SDK (Java)
-    participant UDS as Unix Domain Socket
-    participant Engine as mIceWriter Engine (Rust)
-    participant RocksDB as Local RocksDB (PVC)
-    participant Catalog as Nessie / Glue Catalog (API)
-    participant ObjectStore as S3 Storage (MinIO / AWS S3)
+    participant Resolver as Table Resolver
+    participant Pipeline as engine-{table} Service
+    participant RocksDB as Per-pod RocksDB
+    participant Catalog as Nessie / Glue Catalog
+    participant ObjectStore as S3 (MinIO / AWS S3)
 
     Note over App,SDK: Startup & Registration Phase
-    SDK->>Engine: Register Schema (REGISTER_SCHEMA payload)
-    Engine->>Catalog: Query/Create Iceberg Table
-    Catalog-->>Engine: Table Ready / Exists
+    SDK->>SDK: Scan @IcebergEntity classes
+    SDK->>Resolver: table → endpoint (convention + override map)
+    SDK->>Pipeline: REGISTER_SCHEMA (gRPC unary, bounded retry)
+    Pipeline->>Catalog: Ensure Iceberg table exists
+    Catalog-->>Pipeline: Ready
 
-    Note over App,RocksDB: Hot-Path Ingestion Phase (Microsecond Latency)
+    Note over App,RocksDB: Hot-Path Ingestion (sub-ms ack)
     App->>SDK: icebergTemplate.send(pojo)
-    SDK->>SDK: Serialize POJO to CBOR
-    SDK->>UDS: Write CBOR payload (length-prefixed)
-    UDS->>Engine: Read payload bytes
-    Engine->>RocksDB: Async zero-copy append to active Column Family
-    Engine-->>SDK: Acknowledge IPC response
+    SDK->>SDK: Route by @IcebergEntity.table
+    SDK->>Pipeline: Ingest stream (CBOR bytes over gRPC)
+    Pipeline->>RocksDB: Append to active Column Family
+    Pipeline-->>SDK: ACK
 
-    Note over Engine,ObjectStore: Hybrid Flush Cycle (10 Min or 32 MB)
-    Engine->>Engine: Jitter timer fires OR size limit reached, rotate RocksDB Column Family
-    Engine->>RocksDB: Read frozen Column Family records
-    Engine->>Engine: Parse CBOR → NDJSON → Arrow → Parquet
-    Engine->>ObjectStore: Upload Parquet files (S3 API)
-    Engine->>Catalog: Atomic commit append to Iceberg Table
-    Engine->>RocksDB: Purge frozen Column Family
+    Note over Pipeline,ObjectStore: Hybrid Flush Cycle (per pod)
+    Pipeline->>Pipeline: Rotate CF on 10 min ± 2 min OR 32 MB
+    Pipeline->>RocksDB: Read frozen CF
+    Pipeline->>Pipeline: Parse CBOR → NDJSON → Arrow → Parquet
+    Pipeline->>ObjectStore: PUT Parquet files
+    Pipeline->>Catalog: FastAppendAction commit (exponential backoff on conflicts)
+    Pipeline->>RocksDB: Purge frozen CF
 ```
 
-## 2. Unix Domain Socket (UDS) Protocol & IPC
+A pipeline is a Helm release of the `micewriter-table-pipeline` chart parameterized by `table`, resource budget, replica counts, and flush thresholds. The engine binary is the same across all pipelines but is pinned to one table at startup via `MICEWRITER_TABLE`.
 
-Communication between the `micewriter-sdk-java` and the `micewriter-engine` occurs over a shared Unix Domain Socket located at `/var/run/app/iceberg.sock`.
+See [per-table-pipelines.md](per-table-pipelines.md) for the full v2 design, including resolver configuration, scaling characteristics, and the upgrade paths for HPA signal and commit contention.
 
-### 2.1 Packet Structure
-All IPC messages use a standard 4-byte big-endian length prefix framing protocol to ensure the Rust Tokio runtime can efficiently read complete messages off the stream without blocking.
-- **Bytes [0-3]:** Total Message Length `N` (Unsigned 32-bit Integer, Big Endian)
-- **Bytes [4 to N+4]:** The serialized payload.
+## 2. gRPC Transport & Routing
 
-### 2.2 Serialization
-- **Schemas:** Handshake messages (`REGISTER_SCHEMA`) are sent as JSON.
-- **Telemetry Records:** Hot-path ingestion records (`INGEST_RECORD`) are streamed as native **CBOR** bytes. This dynamic binary format eliminates the Arrow schema repetition on every row, keeping the SDK entirely stateless and memory-free. 
-- **The Engine Pipeline (`CBOR → NDJSON → Arrow → Parquet`):** Because there is no official, battle-tested `arrow-cbor` parser in the Apache Arrow ecosystem, the engine safely transpiles the CBOR into NDJSON strings just-in-time, then leverages the official `arrow-json` parser to rigorously enforce Iceberg schemas and manage complex nested memory (validity bitmaps, nested lists, etc.).
-- **Payload Limits:** The payload size is hard-capped at **16 MB** by both the SDK and the engine to prevent OOM attacks. A 16 MB monolithic array of floats can easily expand into a 200+ MB `serde_json::Value` DOM tree in Rust, which would threaten the sidecar's rigid 512 MiB memory boundary.
+Communication between `micewriter-sdk-java` and the per-table pipelines runs over **gRPC over HTTP/2**. The wire payload keeps the v1 CBOR shape; only the transport changes.
+
+### 2.1 Framing
+gRPC handles framing. The application-layer payload retains the v1 per-record shape: `[u16 table_name_len][table_name UTF-8][CBOR bytes]`. The engine validates that incoming records match the table it was pinned to at startup and rejects cross-table writes.
+
+### 2.2 RPCs
+
+| RPC | Direction | Payload | Notes |
+|---|---|---|---|
+| `RegisterSchema` | SDK → Pipeline | JSON `{ table, namespace, fields }` | Unary; called once per `@IcebergEntity` class at app startup. Bounded retry on unreachable pipeline. |
+| `Ingest` | SDK → Pipeline | Streaming CBOR records | Bidi streaming over a long-lived channel. ACK per record. |
+| `FlushNow` | SDK → Pipeline | Empty | Unary; honored only when `ENABLE_MANUAL_FLUSH=true` (non-production). |
+
+### 2.3 Serialization
+- **Schemas (`RegisterSchema`)** are JSON.
+- **Telemetry records (`Ingest`)** are native CBOR bytes — keeping the SDK stateless, no Arrow schema dictionary per row, framework-agnostic for Spring Boot / Dropwizard.
+- **Engine pipeline (`CBOR → NDJSON → Arrow → Parquet`):** because there is no battle-tested `arrow-cbor` parser in the Apache Arrow ecosystem, the engine transpiles CBOR into NDJSON just-in-time, then leverages `arrow-json` to rigorously enforce Iceberg schemas and manage complex nested memory (validity bitmaps, nested lists, etc.).
+- **Payload limit:** hard-capped at **16 MB** at both SDK and engine. A 16 MB monolithic CBOR array of floats can expand into 200+ MB of `serde_json::Value` DOM in Rust — threatening the engine pod's memory limit during `arrow-json` parsing.
+
+### 2.4 Table → Endpoint Resolution
+The SDK reads `@IcebergEntity.table` from each POJO class and resolves it to a pipeline endpoint via a layered config:
+
+- `MICEWRITER_RESOLVER` template (default `engine-{table}.micewriter.svc:9090`) — applied to every table that fits the convention.
+- `MICEWRITER_RESOLVER_OVERRIDES` map — explicit `table → endpoint` entries for legacy hyphenated names, cross-namespace pipelines, or migration scenarios.
+
+`ManagedChannel` instances are lazy-created per resolved endpoint and cached for the lifetime of the SDK. gRPC's native keepalive and reconnect handle transport blips.
+
+### 2.5 Auth
+Default is **plain gRPC over the cluster network** — the chart ships with no auth requirement. For zero-trust adopters, mTLS is added as a service-mesh overlay (Istio / Linkerd `PeerAuthentication` + `DestinationRule`) without SDK changes.
 
 ## 3. The Flush Cycle & Graceful Shutdown
 
-To consolidate small records into optimized Iceberg v3 Parquet files while protecting the Catalog API from rate limits (the "Thundering Herd" problem):
+To consolidate small records into optimized Iceberg v3 Parquet files while protecting the catalog API from rate limits (the "thundering herd" problem):
 
-- **Hybrid Time/Size Column Family Swap:** The sidecar rotates the active RocksDB Column Family and freezes it for compilation either on a jittered schedule (e.g., 10 minutes ± 2 minutes) OR immediately if the uncompressed data exceeds 32 MB. The 32 MB flush limit ensures the final compiled Parquet bytes held in memory never exceed ~15 MB, safeguarding the 512 MiB container limit.
-- **Compilation:** The frozen CBOR records are decoded into NDJSON, dynamically cast using the Iceberg schema via `arrow-json`, and compiled into Parquet file batches. Note: The engine performs fast, append-only operations; Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs.
-- **Catalog Commit:** The sidecar uploads files to S3 (MinIO or AWS S3) and executes an atomic commit to the configured catalog (Nessie or AWS Glue). On `CommitFailedException` (optimistic locking failure), it uses an exponential backoff retry.
-- **SIGTERM Emergency Flush:** If Kubernetes initiates pod termination, the sidecar intercepts the `SIGTERM` signal, pauses new ingestion, forces an immediate compilation/commit of remaining RocksDB data, and exits safely.
-- **Manual Flush (Testing Only):** In non-production environments, the injector configures `ENABLE_MANUAL_FLUSH=true`, exposing an IPC command to manually force a flush. This enables end-to-end integration tests while remaining disabled in production to protect the Catalog from API abuse.
+- **Hybrid time/size Column Family swap.** Each engine pod rotates its active RocksDB Column Family and freezes the old one for compilation either on a jittered schedule (~10 minutes ± 2 minutes) OR immediately if uncompressed CF data exceeds 32 MB. The 32 MB ceiling keeps compiled Parquet bytes held in memory under ~15 MB, protecting the pod's memory limit.
+- **Compilation.** Frozen CBOR records are decoded into NDJSON, dynamically cast using the Iceberg schema via `arrow-json`, and compiled into Parquet file batches. The engine performs fast, append-only operations — Puffin deletion vectors and row-level updates are deferred to async Iceberg maintenance jobs outside the pipeline.
+- **Catalog commit.** The pipeline uploads Parquet files to S3 (MinIO or AWS S3) and executes an atomic `FastAppendAction` commit against the catalog (Nessie or AWS Glue). On `CommitFailedException` (optimistic-locking conflict from another pod in the same pipeline), exponential backoff retry resolves the conflict.
+- **SIGTERM emergency flush.** When Kubernetes terminates an engine pod (HPA scale-down, rolling update, eviction), the pod intercepts SIGTERM, pauses new ingestion, forces an immediate compilation/commit of its remaining RocksDB data, and exits.
+- **Manual flush (testing only).** In non-production environments, `ENABLE_MANUAL_FLUSH=true` enables the `FlushNow` RPC for end-to-end integration tests. Disabled in production to protect the catalog from API abuse.
+
+> ⚠️ **Per-pipeline commit contention:** with HPA, a pipeline may have N pods committing concurrently. v2.0 relies on optimistic-locking retry; for hot tables that hit the contention wall (~10+ pods), the upgrade path is leader election via a Kubernetes `Lease` within the Deployment. Tracked as a v2.x consideration in [per-table-pipelines.md §8](per-table-pipelines.md).
 
 ## 4. Downstream Analytics Readers
 
-This architecture intentionally abstracts away **read-after-write** capabilities from the emitting Spring Boot application. The system is fundamentally split into two optimized domains:
+This architecture intentionally separates **write optimization** from **read-after-write** concerns. The system is split into two optimized domains:
 
-1. **Write Optimization:** The application achieves microsecond write latency via UDS and local RocksDB caching, completely insulated from cloud API latency.
-2. **Read Optimization:** Distributed query engines (e.g., **Trino, Apache Superset, Athena, Spark**) require large, columnar files to execute analytical queries efficiently. By delaying the Iceberg catalog commit until the sidecar has compiled ~10 minutes (or 32 MB) worth of telemetry into larger Parquet files, downstream analytics platforms are saved from the catastrophic performance degradation of scanning millions of tiny S3 files.
+1. **Write optimization.** Application achieves sub-millisecond write latency via gRPC to a per-table pipeline, insulated from cloud catalog/S3 latency. Each pipeline is sized for its table's payload shape.
+2. **Read optimization.** Distributed query engines (Trino, Apache Superset, Athena, Spark) require large, columnar files to execute analytical queries efficiently. By delaying the Iceberg catalog commit until each pipeline has compiled ~10 minutes (or 32 MB) of telemetry into larger Parquet files, downstream analytics platforms are saved from the catastrophic performance degradation of scanning millions of tiny S3 files.
+
+Per-table isolation means hot tables can independently scale to bigger flush windows or larger pod RAM without affecting cold tables sharing the same cluster.
 
 ---
 ### 🔗 The mIceWriter Ecosystem
@@ -83,10 +109,11 @@ This architecture intentionally abstracts away **read-after-write** capabilities
 * [Motivation & target adopter](why.md)
 
 **🛠️ What:**
-* [System overview & IPC protocol](system-overview.md)
-* [Rust sidecar engine](micewriter-engine.md)
+* [System overview & wire protocol](system-overview.md)
+* [v2: Per-table pipelines](per-table-pipelines.md)
+* [v1 → v2 migration rationale](v1-to-v2-migration.md)
+* [Rust engine internals](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
-* [Kubernetes injector](micewriter-k8s-injector.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](feasibility.md)

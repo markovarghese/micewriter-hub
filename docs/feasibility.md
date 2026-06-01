@@ -137,10 +137,11 @@ Knowing *which* of these is the right next step requires the measurements first.
 * [Motivation & target adopter](why.md)
 
 **🛠️ What:**
-* [System overview & IPC protocol](system-overview.md)
-* [Rust sidecar engine](micewriter-engine.md)
+* [System overview & wire protocol](system-overview.md)
+* [v2: Per-table pipelines](per-table-pipelines.md)
+* [v1 → v2 migration rationale](v1-to-v2-migration.md)
+* [Rust engine internals](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
-* [Kubernetes injector](micewriter-k8s-injector.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](feasibility.md)

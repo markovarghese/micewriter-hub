@@ -5,6 +5,8 @@
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: Mutating Injector](https://img.shields.io/badge/Component-Mutating%20Injector-teal?style=flat-square)](#)
 
+> 🚫 **Sunset in v2.** The per-table pipeline architecture has no sidecar to inject; the remaining adopter wiring is a single env var on the application Deployment, which is not worth a mutating webhook. See **[per-table-pipelines.md](per-table-pipelines.md)** for v2 adoption. This document describes the v1 admission-webhook flow, frozen at the `v1.0.0` tag.
+
 This repository provides the "Service Mesh" style auto-injection. It is the Mutating Webhook that provides the gold standard Developer Experience by hiding all infrastructure boilerplate from the application engineers.
 
 ## 🛠️ Core Technology Stack
@@ -43,10 +45,11 @@ A Docker image containing the controller, and a Helm chart deploying the `Mutati
 * [Motivation & target adopter](why.md)
 
 **🛠️ What:**
-* [System overview & IPC protocol](system-overview.md)
-* [Rust sidecar engine](micewriter-engine.md)
+* [System overview & wire protocol](system-overview.md)
+* [v2: Per-table pipelines](per-table-pipelines.md)
+* [v1 → v2 migration rationale](v1-to-v2-migration.md)
+* [Rust engine internals](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
-* [Kubernetes injector](micewriter-k8s-injector.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](feasibility.md)

@@ -5,6 +5,8 @@
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: Core Engine](https://img.shields.io/badge/Component-Core%20Engine-orange?style=flat-square)](#)
 
+> 📜 **This document describes the v1 sidecar deployment of the engine.** The engine binary still exists in v2, but is deployed as one `Deployment` + `Service` per Iceberg table rather than as a per-pod sidecar. See **[per-table-pipelines.md](per-table-pipelines.md)** for the v2 architecture. The flush internals (RocksDB CF swap, CBOR → NDJSON → Arrow → Parquet, jittered flush, `FastAppendAction` commit) are unchanged from what's described below.
+
 This repository contains the platform/infrastructure core. It is a highly optimized, memory-safe Rust binary that runs alongside the application pods to manage the actual persistence of telemetry data.
 
 ## 🛠️ Core Technology Stack
@@ -34,10 +36,11 @@ A minimal Linux Docker Image (~20MB-50MB) tagged and pushed to the internal cont
 * [Motivation & target adopter](why.md)
 
 **🛠️ What:**
-* [System overview & IPC protocol](system-overview.md)
-* [Rust sidecar engine](micewriter-engine.md)
+* [System overview & wire protocol](system-overview.md)
+* [v2: Per-table pipelines](per-table-pipelines.md)
+* [v1 → v2 migration rationale](v1-to-v2-migration.md)
+* [Rust engine internals](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
-* [Kubernetes injector](micewriter-k8s-injector.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](feasibility.md)

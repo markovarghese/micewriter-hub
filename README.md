@@ -4,9 +4,11 @@
 [![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
 [![Component: Central Hub](https://img.shields.io/badge/Component-Central%20Hub-brightgreen?style=flat-square)](#)
 
-mIceWriter is an **opt-in sidecar** for applications running on AWS EKS (or any Kubernetes cluster) that need to persist telemetry, audit, or model-payload data to Apache Iceberg tables — without paying S3 latency on the hot path, without buffering large payloads in their own JVM heap, and without flooding S3 with tiny files that ruin downstream query performance.
+mIceWriter is an **ingestion platform** for applications running on AWS EKS (or any Kubernetes cluster) that need to persist telemetry, audit, or model-payload data to Apache Iceberg tables — without paying S3 latency on the hot path, without buffering large payloads in their own JVM heap, and without flooding S3 with tiny files that ruin downstream query performance.
 
-Adoption is a single pod annotation. A mutating webhook injects the engine sidecar, a shared Unix Domain Socket, and an ephemeral RocksDB cache. The application talks to the sidecar locally over UDS; the sidecar absorbs writes at microsecond latency and asynchronously consolidates them into Parquet files committed to the Iceberg catalog (AWS Glue in production, Apache Nessie locally).
+In **v2**, mIceWriter deploys **one engine `Deployment` + `Service` per Iceberg table**. Applications add the Java SDK as a Maven dependency, annotate domain objects with `@IcebergEntity(table = "...")`, and call `icebergTemplate.send(pojo)`. The SDK routes each record over gRPC to the right pipeline. Each pipeline absorbs writes with sub-millisecond ack and asynchronously consolidates them into Parquet files committed to the Iceberg catalog (AWS Glue in production, Apache Nessie locally).
+
+> 📜 The v1 per-pod sidecar variant is preserved at the `v1.0.0` tag on every `micewriter-*` repo. See [v1 → v2 migration rationale](docs/v1-to-v2-migration.md) for the pivot story.
 
 ---
 
@@ -26,29 +28,41 @@ If you are deciding whether to adopt the sidecar in your own application, start 
 
 ## 🗺️ System topology
 
-The system operates entirely within the Kubernetes pod networking boundary, ensuring zero network latency for the business application during data emission:
+In v2 the application writes to **per-table engine pipelines** over gRPC. Each pipeline is independent — its own `Deployment`, `Service`, `HorizontalPodAutoscaler`, and resource budget sized to that table's payload shape.
 
 ```mermaid
 graph TD
-    subgraph K8sPod ["Kubernetes Pod Boundary"]
-        App["Spring Boot App Container"] -->|Netty / Epoll UDS| UDS["Unix Domain Socket<br/>(/var/run/app/iceberg.sock)"]
-        UDS -->|Tokio UnixListener| Engine["mIceWriter Engine (Rust Container)"]
-        Engine -->|RocksDB Crate| RocksDB[("Isolated RocksDB Cache<br/>(Generic Ephemeral PVC)")]
+    subgraph K8sCluster ["Kubernetes Cluster"]
+        subgraph AppPod ["App Pod"]
+            App["Spring Boot App<br/>(SDK as Maven dep)"]
+        end
+
+        subgraph Pipelines ["Per-Table Engine Pipelines"]
+            PipeT["engine-telemetry<br/>(Deployment + HPA)"]
+            PipeA["engine-audit<br/>(Deployment + HPA)"]
+            PipeM["engine-model-eval<br/>(Deployment + HPA, large RAM)"]
+        end
+
+        App -->|gRPC :9090| PipeT
+        App -->|gRPC :9090| PipeA
+        App -->|gRPC :9090| PipeM
     end
 
-    subgraph K8sCluster ["Kubernetes Cluster Services (or AWS)"]
-        Catalog[("Apache Nessie / AWS Glue Catalog")]
-        ObjectStore[("MinIO / AWS S3 Object Store")]
-        Webhook["Mutating Webhook Injector"]
+    subgraph CloudOrLocal ["Catalog + Object Store"]
+        Catalog[("Apache Nessie / AWS Glue")]
+        ObjectStore[("MinIO / AWS S3")]
     end
 
-    Engine -->|Catalog API| Catalog
-    Engine -->|S3 Upload API| ObjectStore
-    Webhook -.->|Auto-injects Sidecar & PVCs| K8sPod
+    PipeT --> Catalog
+    PipeT --> ObjectStore
+    PipeA --> Catalog
+    PipeA --> ObjectStore
+    PipeM --> Catalog
+    PipeM --> ObjectStore
 
-    style K8sPod fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style K8sCluster fill:#f5f7fa,stroke:#4a5568,stroke-width:1px
-    style RocksDB fill:#e2e8f0,stroke:#4a5568,stroke-width:1px
+    style AppPod fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style Pipelines fill:#e6f0fa,stroke:#4a5568,stroke-width:1px
+    style CloudOrLocal fill:#f5f7fa,stroke:#4a5568,stroke-width:1px
 ```
 
 ---
@@ -60,11 +74,10 @@ The system is broken down into six repositories along separation-of-concerns lin
 | Lens | Repository | Description | Stack | Doc |
 |---|---|---|---|---|
 | 🧭 Meta | 🌐 **`micewriter-hub`** *(this repo)* | Architecture, motivation, feasibility eval — introduces all three lenses | Markdown, Mermaid | [README.md](README.md) |
-| 🛠️ What | 🦀 **`micewriter-engine`** | Memory-safe Rust sidecar managing RocksDB buffer and Iceberg commits | Rust, Tokio, RocksDB, iceberg-rust | [micewriter-engine.md](docs/micewriter-engine.md) |
-| 🛠️ What | ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot + Dropwizard) with Netty UDS transport | Java, Netty, CBOR | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
-| 🛠️ What | ☸️ **`micewriter-k8s-injector`** | Mutating Admission Webhook for auto-injection of sidecar + volumes | Go (k8s.io/api), TLS | [micewriter-k8s-injector.md](docs/micewriter-k8s-injector.md) |
-| 🔬 Viable? | 🐳 **`micewriter-local-infra`** | Local data-lake stand-in (MinIO + Nessie) on k3s | Helm, Kubernetes | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |
-| 🔬 Viable? | 🧪 **`micewriter-sandbox`** | Reference Spring Boot app driving load against the local engine | Spring Boot, Docker | [micewriter-sandbox.md](docs/micewriter-sandbox.md) |
+| 🛠️ What | 🦀 **`micewriter-engine`** | Memory-safe Rust engine managing RocksDB buffer and Iceberg commits; deployed as one `Deployment` per Iceberg table in v2 | Rust, Tokio, RocksDB, iceberg-rust, Tonic gRPC | [micewriter-engine.md](docs/micewriter-engine.md) |
+| 🛠️ What | ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot + Dropwizard) with gRPC transport and table-name routing | Java, gRPC, CBOR | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
+| 🔬 Viable? | 🐳 **`micewriter-local-infra`** | Local data-lake stand-in (MinIO + Nessie) on k3s; hosts the per-table pipeline Helm chart | Helm, Kubernetes | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |
+| 🔬 Viable? | 🧪 **`micewriter-sandbox`** | Reference Spring Boot app driving load against per-table pipelines | Spring Boot, Docker | [micewriter-sandbox.md](docs/micewriter-sandbox.md) |
 
 ---
 
@@ -86,10 +99,11 @@ This organizes all codebases into a unified explorer sidebar in your IDE.
 * [Motivation & target adopter](docs/why.md)
 
 **🛠️ What:**
-* [System overview & IPC protocol](docs/system-overview.md)
-* [Rust sidecar engine](docs/micewriter-engine.md)
+* [System overview & wire protocol](docs/system-overview.md)
+* [v2: Per-table pipelines](docs/per-table-pipelines.md)
+* [v1 → v2 migration rationale](docs/v1-to-v2-migration.md)
+* [Rust engine internals](docs/micewriter-engine.md)
 * [Java SDK](docs/micewriter-sdk-java.md)
-* [Kubernetes injector](docs/micewriter-k8s-injector.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](docs/feasibility.md)

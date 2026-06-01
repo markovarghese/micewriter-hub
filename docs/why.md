@@ -45,15 +45,18 @@ This shifts every one of the four pains:
 
 ## 3. Who this is for
 
-The intended adopter is **another team running a Spring Boot or Dropwizard application on AWS EKS** that wants Iceberg persistence without taking on the four pains above. Adoption is a single pod annotation:
+The intended adopter is **another team running a Spring Boot or Dropwizard application on AWS EKS** that wants Iceberg persistence without taking on the four pains above.
 
-```yaml
-metadata:
-  annotations:
-    iceberg-stream.micewriter.io/inject: "true"
-```
+In v2 ([per-table pipelines](per-table-pipelines.md)) adoption has two surfaces:
 
-The [mutating webhook](micewriter-k8s-injector.md) injects the engine sidecar container, the shared UDS volume, and the RocksDB ephemeral PVC. The application adds the [Java SDK](micewriter-sdk-java.md) as a dependency, annotates its domain objects with `@IcebergEntity`, and calls `icebergTemplate.send(pojo)` from wherever a record needs to be persisted. No infrastructure code changes are required beyond those two surface-area decisions.
+1. **App-side:** add the [Java SDK](micewriter-sdk-java.md) as a Maven dependency, annotate domain objects with `@IcebergEntity(table = "...")`, and call `icebergTemplate.send(pojo)`. Point the SDK at the pipeline resolver via app config:
+   ```yaml
+   micewriter:
+     resolver: "engine-{table}.micewriter.svc:9090"
+   ```
+2. **Platform-side (once per Iceberg table):** the platform team installs the `micewriter-table-pipeline` Helm release for the new table. Each release provisions an engine `Deployment`, a `Service`, and an `HorizontalPodAutoscaler` named after the table. New tables are expected infrequently — there is no operator or CRD; Helm is the provisioning surface.
+
+No Kubernetes annotation, no sidecar injection, no per-pod PVC. The v1 `micewriter-k8s-injector` admission webhook is sunset in v2 — its remaining job (mount a volume, inject an env var) wasn't worth a mutating webhook.
 
 ### Should you adopt this?
 
@@ -150,10 +153,11 @@ That evaluation is documented separately:
 * [Motivation & target adopter](why.md)
 
 **🛠️ What:**
-* [System overview & IPC protocol](system-overview.md)
-* [Rust sidecar engine](micewriter-engine.md)
+* [System overview & wire protocol](system-overview.md)
+* [v2: Per-table pipelines](per-table-pipelines.md)
+* [v1 → v2 migration rationale](v1-to-v2-migration.md)
+* [Rust engine internals](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
-* [Kubernetes injector](micewriter-k8s-injector.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](feasibility.md)
