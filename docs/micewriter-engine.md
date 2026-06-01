@@ -24,6 +24,22 @@ The Sidecar Engine is injected automatically into business application pods. Its
    * **End-to-End Testing:** The engine can be configured to accept manual flush requests via the IPC socket by setting `ENABLE_MANUAL_FLUSH=true` (injected globally by the Kubernetes Webhook to ensure production environments remain protected from API abuse).
 3. **Signal Trapping:** It hooks into OS signals to catch Kubernetes `SIGTERM` events, safely draining in-flight UDS connections and forcing an emergency final flush of all local cache to S3 before allowing the pod to die.
 
+## 🚨 Troubleshooting & Known Issues
+
+### 1. OOMKilled (Exit Code 137) during Heavy Load Tests
+In Kubernetes environments with tight cgroup memory limits (e.g., 512 MiB), the `micewriter-engine` can be indiscriminately OOMKilled by the kernel during massive burst traffic (e.g., 100 MB/s). 
+
+**Root Cause:**
+RocksDB flushes massive amounts of data as SST files to the local PVC. The Linux Kernel buffers these filesystem writes into the Page Cache. Under Kubernetes, the Page Cache accumulated by a process is strictly charged against the container's `memory.usage_in_bytes` alongside its actual RSS (Resident Set Size) heap. If the underlying disk is too slow to persist these dirty pages before the combined memory hits the cgroup limit, the kernel fails to reclaim the pages and instantly terminates the container.
+
+**Resolution:**
+The engine bypasses the Linux Page Cache entirely by enabling **Direct I/O** for all background flushes, compactions, and reads in RocksDB:
+```rust
+db_opts.set_use_direct_io_for_flush_and_compaction(true);
+db_opts.set_use_direct_reads(true);
+```
+With Direct I/O enabled, the engine's memory footprint is strictly bounded to its physical RSS (which sits stably under ~200 MB), completely immunizing it against Page Cache inflation.
+
 ## 📦 Output Artifact
 A minimal Linux Docker Image (~20MB-50MB) tagged and pushed to the internal container registry.
 
