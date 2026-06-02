@@ -5,7 +5,7 @@
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: Mutating Injector](https://img.shields.io/badge/Component-Mutating%20Injector-teal?style=flat-square)](#)
 
-> 🚫 **Sunset in v2.** The per-table pipeline architecture has no sidecar to inject; the remaining adopter wiring is a single env var on the application Deployment, which is not worth a mutating webhook. See **[per-table-pipelines.md](per-table-pipelines.md)** for v2 adoption. This document describes the v1 admission-webhook flow, frozen at the `v1.0.0` tag.
+> 📜 **v1-only component (actively maintained).** The per-table pipeline architecture (v2) has no sidecar to inject and no use for this admission webhook. The webhook is part of the v1 release line and continues on the `v1` branch of `micewriter-k8s-injector`. See **[per-table-pipelines.md](per-table-pipelines.md)** for v2 adoption; this document describes the v1 admission-webhook flow.
 
 This repository provides the "Service Mesh" style auto-injection. It is the Mutating Webhook that provides the gold standard Developer Experience by hiding all infrastructure boilerplate from the application engineers.
 

@@ -7,7 +7,7 @@
 
 This document describes **v2** of the mIceWriter ingestion architecture: **one engine `Deployment` + `Service` per Iceberg table**, replacing the v1 per-pod sidecar topology. The Java SDK routes each `send(pojo)` to the correct pipeline using the existing `@IcebergEntity(table = "...")` annotation. New pipelines are provisioned by Helm release; new tables are expected infrequently.
 
-> 📜 **Looking for v1?** The per-pod sidecar variant is preserved at the `v1.0.0` tag on every `micewriter-*` repo. See [v1-to-v2-migration.md](v1-to-v2-migration.md) for the pivot rationale.
+> 📜 **Looking for v1?** The per-pod sidecar variant is an actively maintained release line on the `v1` branch of every `micewriter-*` repo (`v1.0.0` tags the original snapshot). See [v1-to-v2-migration.md](v1-to-v2-migration.md) for the pivot rationale.
 
 ## 1. Topology
 

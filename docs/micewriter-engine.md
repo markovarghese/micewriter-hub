@@ -5,7 +5,7 @@
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: Core Engine](https://img.shields.io/badge/Component-Core%20Engine-orange?style=flat-square)](#)
 
-> 📜 **This document describes the v1 sidecar deployment of the engine.** The engine binary still exists in v2, but is deployed as one `Deployment` + `Service` per Iceberg table rather than as a per-pod sidecar. See **[per-table-pipelines.md](per-table-pipelines.md)** for the v2 architecture. The flush internals (RocksDB CF swap, CBOR → NDJSON → Arrow → Parquet, jittered flush, `FastAppendAction` commit) are unchanged from what's described below.
+> 📜 **This document describes the v1 sidecar deployment of the engine** — an actively maintained release line on the `v1` branch of `micewriter-engine`. The engine binary also exists in v2, deployed as one `Deployment` + `Service` per Iceberg table rather than as a per-pod sidecar. See **[per-table-pipelines.md](per-table-pipelines.md)** for v2. v1 and v2 evolve independently; the flush internals described below are the v1 reference and may diverge from v2 over time.
 
 This repository contains the platform/infrastructure core. It is a highly optimized, memory-safe Rust binary that runs alongside the application pods to manage the actual persistence of telemetry data.
 

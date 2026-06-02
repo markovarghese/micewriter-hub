@@ -5,7 +5,7 @@
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: System Overview](https://img.shields.io/badge/Component-System%20Overview-lightgrey?style=flat-square)](#)
 
-This document outlines the core architecture and data flows for the mIceWriter telemetry ingestion pipeline as of **v2: per-table engine pipelines**. For the v1 sidecar variant the system started from, check out the `v1.0.0` tag on every `micewriter-*` repo — and see [v1-to-v2-migration.md](v1-to-v2-migration.md) for the pivot rationale.
+This document outlines the core architecture and data flows for the mIceWriter telemetry ingestion pipeline as of **v2: per-table engine pipelines**. The v1 sidecar variant is an actively maintained release line on the `v1` branch of every `micewriter-*` repo (`v1.0.0` tags the original snapshot). See [v1-to-v2-migration.md](v1-to-v2-migration.md) for the pivot rationale.
 
 ## 1. Global Architecture & Topology
 

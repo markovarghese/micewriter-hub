@@ -8,7 +8,7 @@ mIceWriter is an **ingestion platform** for applications running on AWS EKS (or 
 
 In **v2**, mIceWriter deploys **one engine `Deployment` + `Service` per Iceberg table**. Applications add the Java SDK as a Maven dependency, annotate domain objects with `@IcebergEntity(table = "...")`, and call `icebergTemplate.send(pojo)`. The SDK routes each record over gRPC to the right pipeline. Each pipeline absorbs writes with sub-millisecond ack and asynchronously consolidates them into Parquet files committed to the Iceberg catalog (AWS Glue in production, Apache Nessie locally).
 
-> 📜 The v1 per-pod sidecar variant is preserved at the `v1.0.0` tag on every `micewriter-*` repo. See [v1 → v2 migration rationale](docs/v1-to-v2-migration.md) for the pivot story.
+> 📜 The v1 per-pod sidecar variant is an actively maintained release line on the `v1` branch of every `micewriter-*` repo (`v1.0.0` tags the original snapshot). v1 and v2 evolve independently. See [v1 → v2 migration rationale](docs/v1-to-v2-migration.md) for the pivot story.
 
 ---
 

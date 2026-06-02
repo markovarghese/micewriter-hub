@@ -60,23 +60,24 @@ Honest about the price:
 - **No more single-annotation adoption.** v1 was one annotation; v2 is one env var + a Maven dep + the per-table Helm release (done by the platform team, not the adopter). Still vastly less than implementing buffering yourself, but no longer "one annotation."
 - **Sub-millisecond instead of microsecond latency.** gRPC over the cluster network is ~1 ms p50 instead of UDS's ~10 µs. For Spring Boot / Dropwizard request handlers (the intended adopter), this is well under the request-budget noise floor.
 
-## v1 is preserved
+## v1 is a maintained release line
 
-The v1 architecture lives on every `micewriter-*` repo at two equivalent refs:
+Both architectures are actively maintained release lines, on separate branches of every `micewriter-*` repo:
 
-- **`v1` branch** — the ergonomic checkout target. `git clone -b v1 ...` works; sits next to `main` in GitHub's UI so v1 is visible as a maintained alternative, not buried metadata.
-- **`v1.0.0` tag** — the immutable canonical reference. Use it to verify "this is exactly v1" or to script reproducible checkouts.
+- **`v1` branch — v1 (per-pod sidecar) release line.** Receives ongoing enhancements and fixes independently of v2. **Not frozen.**
+- **`v1.0.0` tag — immutable snapshot at the v2 split point.** Useful for reproducible v1 deployments of the exact starting state; the `v1` branch may already be ahead of it.
+- **`main` branch — v2 (per-table pipeline) release line.** The new architecture documented in [per-table-pipelines.md](per-table-pipelines.md).
 
-To redeploy v1:
+To redeploy the current v1 head:
 
 ```sh
 for d in micewriter-hub micewriter-engine micewriter-sdk-java \
          micewriter-k8s-injector micewriter-sandbox micewriter-local-infra; do
-  git -C "$d" checkout v1   # or 'v1.0.0' for the tag
+  git -C "$d" checkout v1   # or 'v1.0.0' for the original snapshot
 done
 ```
 
-The local-infra `run.ps1` can deploy either variant by checking out matching refs across repos. The `v1` branch is protected against direct pushes (PR-only) once published — it stays frozen by default; any future v1 fixes would land as deliberate backport PRs.
+The local-infra `run.ps1` can deploy either line by checking out matching refs across repos. v1 enhancements are not backports from v2 — they are independent work on the v1 architecture; v2 work likewise does not need to backport. The two lines coexist by design.
 
 ## Related
 
