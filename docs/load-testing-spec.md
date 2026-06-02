@@ -243,7 +243,7 @@ Wait for the timer to trigger (up to 12 minutes), then confirm the following:
    Starting flush cycle
    Column family rotated frozen=active
    ...
-   Iceberg commit successful table=telemetry_events
+   Iceberg commit successful table=load_test_events
    ```
 2. **No retries**: Ensure there are no 404 or retry loops in the engine logs during this commit.
 3. **Row counts**: Confirm the row count in the resulting MinIO Parquet files matches the sandbox `totalSent` minus any rows in the next active CF.
@@ -305,7 +305,6 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 
 | Gap | Impact | Suggested fix |
 |---|---|---|
-| Sandbox `TelemetryEvent.payload` is a `String` | 10 MB string payloads are valid Java but test a different serialization path than real binary tensor payloads | Acceptable for initial sizing; revisit when binary payloads are introduced |
 | Single-replica only | Catalog contention from concurrent commits across many engine sidecars is not exercised | Phase-2 follow-up: scale the sandbox Deployment to 2–3 replicas (lifting the k8s-node-3 nodeSelector) and re-run one or two cells. See [feasibility.md §4](feasibility.md) for what the local setup does and does not measure. |
 | Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, CBOR decode latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and inject the corresponding scrape annotations via the k8s-injector webhook. |
 

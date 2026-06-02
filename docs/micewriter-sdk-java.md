@@ -68,7 +68,7 @@ Add the starter dependency — it auto-configures everything via `META-INF/sprin
 ```
 
 ```java
-@IcebergEntity(table = "telemetry_events", namespace = {"analytics"})
+@IcebergEntity(table = "load_test_events", namespace = {"analytics"})
 public class TelemetryEvent {
     @IcebergId private String id;
     private String source;

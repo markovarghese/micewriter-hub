@@ -25,24 +25,24 @@ Athena queries Iceberg tables natively via the AWS Glue catalog. Because the mIc
 
 1. Open the **AWS Athena console** → select your workgroup
 2. In the left sidebar, select the Glue database that matches your engine's `CATALOG_NAMESPACE` (e.g. `micewriter`)
-3. The table (e.g. `telemetry_events`) appears automatically — no `CREATE TABLE` needed
+3. The table (e.g. `load_test_events`) appears automatically — no `CREATE TABLE` needed
 
 ### Example SQL
 
 ```sql
 -- Preview recent events
-SELECT * FROM "micewriter"."telemetry_events"
+SELECT * FROM "micewriter"."load_test_events"
 ORDER BY event_time DESC
 LIMIT 100;
 
 -- Aggregate by source
 SELECT source, COUNT(*) AS event_count
-FROM "micewriter"."telemetry_events"
+FROM "micewriter"."load_test_events"
 GROUP BY source
 ORDER BY event_count DESC;
 
 -- Iceberg time travel (query a previous snapshot)
-SELECT * FROM "micewriter"."telemetry_events"
+SELECT * FROM "micewriter"."load_test_events"
 FOR SYSTEM_TIME AS OF TIMESTAMP '2025-01-01 00:00:00'
 LIMIT 100;
 ```
@@ -93,13 +93,13 @@ Go to **SQL > SQL Lab**, select the `Trino Iceberg` database and `micewriter` sc
 
 ```sql
 -- Preview recent events
-SELECT * FROM iceberg.micewriter.telemetry_events
+SELECT * FROM iceberg.micewriter.load_test_events
 ORDER BY event_time DESC
 LIMIT 100;
 
 -- Aggregate by source
 SELECT source, COUNT(*) AS event_count
-FROM iceberg.micewriter.telemetry_events
+FROM iceberg.micewriter.load_test_events
 GROUP BY source
 ORDER BY event_count DESC;
 

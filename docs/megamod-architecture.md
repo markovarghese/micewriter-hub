@@ -49,7 +49,7 @@ To automate the Ahead-Of-Time compilation without introducing developer friction
 - **Propagation:** It triggers a `repository_dispatch` to the engine repo containing the payload.
 
 #### Action B: Engine Repository (`compile-megamod.yml`)
-- **Execution:** Receives the payload and saves it into the `schemas/` directory using the hash as the filename (e.g., `schemas/telemetry_events_a1b2c3.json`). 
+- **Execution:** Receives the payload and saves it into the `schemas/` directory using the hash as the filename (e.g., `schemas/load_test_events_a1b2c3.json`). 
 - **Append-Only:** This directory is append-only. By never overwriting schemas, the engine compiles builders for *all* historically active schema versions, which is critical for supporting Kubernetes rolling deployments where old and new pods emit different schemas simultaneously.
 
 ### 2. The Rust Code Generator (`build.rs`)

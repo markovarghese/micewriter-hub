@@ -168,7 +168,7 @@ iceberg_writer: commit succeeded, snapshot_id=...
 ### Confirm data landed
 
 1. **MinIO console** — `http://k8s-node-1.local:9001`
-   Browse `iceberg/` → `micewriter/` → `telemetry_events/` — Parquet files appear after
+   Browse `iceberg/` → `micewriter/` → `load_test_events/` — Parquet files appear after
    the first flush cycle.
 
 2. **Nessie API** — confirm the Iceberg table exists:
