@@ -69,6 +69,9 @@ To consolidate small records into optimized Iceberg v3 Parquet files while prote
 - **SIGTERM Emergency Flush:** If Kubernetes initiates pod termination, the sidecar intercepts the `SIGTERM` signal, pauses new ingestion, forces an immediate compilation/commit of remaining RocksDB data, and exits safely.
 - **Manual Flush (Testing Only):** In non-production environments, the injector configures `ENABLE_MANUAL_FLUSH=true`, exposing an IPC command to manually force a flush. This enables end-to-end integration tests while remaining disabled in production to protect the Catalog from API abuse.
 
+> [!NOTE]
+> For a detailed breakdown of the exact buffer limits and how the engine handles backpressure during the flush cycle, see the **[System Limits and Backpressure](limits-and-backpressure.md)** analysis.
+
 ## 4. Downstream Analytics Readers
 
 This architecture intentionally abstracts away **read-after-write** capabilities from the emitting Spring Boot application. The system is fundamentally split into two optimized domains:
@@ -84,6 +87,7 @@ This architecture intentionally abstracts away **read-after-write** capabilities
 
 **🛠️ What:**
 * [System overview & IPC protocol](system-overview.md)
+* [System limits & backpressure analysis](limits-and-backpressure.md)
 * [Rust sidecar engine](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
 * [Kubernetes injector](micewriter-k8s-injector.md)

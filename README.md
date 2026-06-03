@@ -87,6 +87,7 @@ This organizes all codebases into a unified explorer sidebar in your IDE.
 
 **🛠️ What:**
 * [System overview & IPC protocol](docs/system-overview.md)
+* [System limits & backpressure analysis](docs/limits-and-backpressure.md)
 * [Rust sidecar engine](docs/micewriter-engine.md)
 * [Java SDK](docs/micewriter-sdk-java.md)
 * [Kubernetes injector](docs/micewriter-k8s-injector.md)
