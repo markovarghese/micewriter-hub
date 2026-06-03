@@ -56,26 +56,22 @@ To understand the impact of the limits and the backpressure bug, let's explore t
 
 * **Throughput**: 100 MB / sec.
 * **Payload Limit**: 1 MB is under the 16 MB limit.
-* **The Catastrophic Failure**:
-  At 100 MB/sec, the active CF fills up incredibly fast. Depending on what random rotation limit was generated (between 24 MB and 40 MB), the system will fail in one of two ways:
-  
-  **Outcome A: The Deadlock (Rotation limit > 32 MB, e.g., 36 MB)**
-  1. The active CF reaches 32 MB in 0.32 seconds.
-  2. The `total_unflushed_bytes` hits 32 MB. The backpressure logic kicks in, rejecting all incoming IPC messages.
-  3. Because the active CF is only 32 MB, it hasn't reached its 36 MB rotation limit. It never triggers a flush!
-  4. The engine completely deadlocks. It rejects all traffic for up to 10 minutes until the periodic timer wakes up to flush the stuck buffer.
-
-  **Outcome B: Severe Throttling (Rotation limit < 32 MB, e.g., 24 MB)**
-  1. The active CF hits 24 MB in 0.24 seconds. The Engine rotates the CF and triggers a background flush.
-  2. The active CF is now 0 MB, but the frozen CF is 24 MB. `total_unflushed_bytes` = 24 MB.
-  3. The Engine has only 8 MB of "headroom" left. 0.08 seconds later, the new active CF hits 8 MB. `total_unflushed_bytes` hits 32 MB.
-  4. Backpressure kicks in, rejecting all traffic. The host app is completely blocked while the Engine spends seconds compiling, uploading to S3, and committing the 24 MB frozen CF.
-  5. Once the flush finishes, the frozen CF is dropped, and 24 MB of buffer frees up, only to be filled and throttled again a quarter-second later.
+* **The Reality (I/O Bottleneck)**:
+  At 100 MB/sec, the active CF hits its 32 MB limit and rotates every ~0.3 seconds.
+  However, the background `flush_engine` takes several seconds to compile 32 MB of CBOR into Parquet, upload it to MinIO, and commit it to Nessie.
+* **Backpressure in Action**:
+  1. The engine rapidly accumulates 3 frozen CFs (roughly 96 MB).
+  2. As the new active CF fills, `total_unflushed_bytes` hits the 128 MB global backpressure limit (`32 MB * (1 + 3 frozen CFs)`).
+  3. The Engine gracefully enters backpressure and rejects incoming IPC messages.
+  4. The host application is throttled (receives IPC errors) but the sidecar's memory is perfectly protected from OOM-killing.
+* **Result**: The engine sustainably flushes at its maximum possible I/O speed (~15-20 MB/sec depending on CPU/network) and safely rejects the excess 80 MB/sec of traffic.
 
 ![Scenario 2 Sequence Diagram](./diagrams/scenario2.drawio.svg)
 
 ---
 
-## 4. Proposed Fix
+## 4. Fix Implemented
 
-To resolve the backpressure flaw, the Engine's `max_unflushed_bytes` limit in `uds_server.rs` must be decoupled from `flush_size_bytes`. By setting the backpressure limit to something like `config.flush_size_bytes * 4` (e.g., 128 MB), the Engine can comfortably hold one active CF and up to three frozen CFs (`MAX_RETAINED_FROZEN_CFS`), allowing it to absorb high-throughput spikes while background flush tasks execute.
+The catastrophic deadlock bug in `uds_server.rs` has been patched. The Engine's `max_unflushed_bytes` limit is now properly decoupled from `flush_size_bytes` by factoring in the `MAX_RETAINED_FROZEN_CFS` setting (default 3). 
+
+This safely raises the backpressure limit to 128 MB (for a 32 MB flush size), allowing the engine to comfortably hold one active CF and up to three frozen CFs. This grants it the headroom to absorb high-throughput spikes while background flush tasks execute, ensuring predictable throttling instead of deadlocks.
