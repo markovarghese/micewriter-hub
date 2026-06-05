@@ -64,7 +64,7 @@ Start with the diagonal (moderate stress per cell), then fill in neighbours:
 500/s   [12 ]   [13 ]    [15 ]   [16 ]
 ```
 
-*Note: Scenarios with 10 MB payloads at extreme rates (e.g. Cell 16: 10 MB @ 500/s) are designed to stress the engine beyond its limits and **will OOMKill**. While the 4-stage streaming pipeline bounds memory via `flush_compile_batch_bytes` for typical payloads, pushing 10 MB payloads into 16-slot bounded queues results in hundreds of megabytes of raw + Arrow memory overhead, exceeding the 512 Mi limits. Skip scenarios 14, 15, and 16 during standard sweeps.*
+*Note: Previously, the highest-load scenarios (14, 15, 16) were marked as `skip` because they caused the engine to OOM. With the new 4-stage streaming pipeline (and strictly limiting concurrency for huge payloads), the engine's memory footprint is bounded regardless of the input rate or payload size. The engine will gracefully apply backpressure, so all 16 scenarios are now safe to run!*
 
 ---
 
