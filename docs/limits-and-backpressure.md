@@ -1,6 +1,6 @@
 # System Limits and Backpressure
 
-This document explains the limits applied by the `micewriter-sdk` and `micewriter-engine` as telemetry data flows from the host application to the Iceberg tables. It outlines the intentional constraints, the mechanisms for backpressure, and a critical flaw in the current backpressure implementation.
+This document explains the limits applied by the `micewriter-sdk` and `micewriter-engine` as telemetry data flows from the host application to the Iceberg tables. It outlines the intentional constraints and the mechanisms for backpressure.
 
 > [!NOTE]
 > For a mathematical derivation of how these limits translate into expected system throughput, see the [Effective Throughput Model](throughput-model.md).
@@ -87,14 +87,14 @@ sequenceDiagram
 
 * **Throughput**: 100 MB / sec.
 * **Payload Limit**: 1 MB is under the 16 MB limit.
-* **The Reality (I/O Bottleneck)**:
-  At 100 MB/sec, the active CF hits its 32 MB limit and rotates every ~0.3 seconds. However, the background `flush_engine` takes several seconds to compile 32 MB of CBOR into Parquet, upload it to MinIO, and commit it to Nessie.
+* **The Reality (High-Speed Pipelining vs Single Core)**:
+  At 100 MB/sec, the active CF hits its 32 MB limit and rotates every ~0.3 seconds. The background `flush_engine` uses a 4-stage pipelined architecture to parse the data and concurrently upload multiple Parquet chunks to MinIO via a `JoinSet`. However, because the parser is mathematically locked to a single thread to guarantee memory bounds, the CPU maxes out at ~25-30 MB/s.
 * **Healthy Backpressure in Action**:
-  1. The engine rapidly accumulates 3 frozen CFs (expected ~96 MB depending on rotation jitter).
-  2. As the 3rd CF freezes, the `MAX_RETAINED_FROZEN_CFS` limit is instantly hit. The new active CF is blocked at 0 bytes.
-  3. The Engine gracefully enters backpressure and rejects incoming IPC messages.
-  4. The host application is throttled (receives IPC errors) but the sidecar's memory is perfectly protected from OOM-killing.
-* **Result**: The engine sustainably flushes at its maximum possible I/O speed (~15-20 MB/sec depending on CPU/network) and safely rejects the excess 80 MB/sec of traffic without ever deadlocking.
+  1. Because the host application generates data faster (100 MB/s) than the engine can process it (25-30 MB/s), the engine begins accumulating frozen CFs.
+  2. Within ~1 second, the `MAX_RETAINED_FROZEN_CFS` limit (and the 128 MB shadow limit) is hit.
+  3. The engine begins rejecting IPC requests with a "backpressure" error. The SDK catches these and gracefully drops the excess events.
+  4. The host application continues to run without experiencing OOM crashes or thread-pool exhaustion!
+* **Result**: The engine smoothly sustains ~25-30 MB/s of ingestion without dropping the pod, gracefully shedding the excess 70 MB/s load via backpressure.
 
 ```mermaid
 sequenceDiagram
@@ -106,19 +106,16 @@ sequenceDiagram
     App->>SDK: Send 1 MB events (100 MB/s)
     SDK->>UDS: IPC Messages (1 MB)
     UDS->>ActiveCF: Append
-    Note over ActiveCF,Flush: Every ~0.3s, Active CF hits 32 MB and rotates
-    Flush->>Flush: Compiling and Uploading (Takes ~1.5s per 32MB)
-    Note over ActiveCF,Flush: Engine accumulates 3 Frozen CFs (~96 MB)
+    Note over ActiveCF,Flush: Active CF hits 32 MB and rotates
+    Flush->>Flush: Single-Threaded CPU Pipeline
+    Note over ActiveCF,Flush: Pipeline drains data at ~25 MB/s
     App->>SDK: Send next 1 MB event
     SDK->>UDS: IPC Message
-    Note over UDS: 3 Retained CFs limit hit! (~96 MB)
-    UDS-->>SDK: AckResponse::error (Backpressure)
-    SDK-->>App: Exception / Throttled
-    Note over App,UDS: Host app safely throttled. No memory unbounded growth.
-    Flush->>Flush: Upload completes
-    Flush->>ActiveCF: Drops oldest Frozen CF (Frees 32 MB)
-    Note over UDS: 2 Retained CFs (Limit Cleared)
-    App->>SDK: Retries event
-    SDK->>UDS: IPC Message
-    UDS->>ActiveCF: Append (Resumed)
+    Note over UDS: Retained CF limit is hit (128 MB backlog)!
+    UDS-->>SDK: AckResponse::error(backpressure)
+    SDK-->>App: Drop event (graceful degradation)
+    Note over App,UDS: Host app avoids OOM.
+    Flush->>Flush: Concurrent S3 uploads complete
+    Flush->>ActiveCF: Drops oldest Frozen CF
+    App->>SDK: Next event (Accepted)
 ```

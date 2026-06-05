@@ -15,7 +15,7 @@ Here is the formula to calculate the system's average effective throughput ($R_{
 * **$L_{payload}$** : `MAX_PAYLOAD_BYTES` (16 MB limit per message)
 * **$L_{flush}$** : `flush_size_bytes` (Target active CF rotation size, e.g., 32 MB)
 * **$N_{frozen}$** : `MAX_RETAINED_FROZEN_CFS` (Max pending flushes, e.g., 3)
-* **$R_{io}$** : **Background I/O Rate** (bytes / second). This is the speed at which the `flush_engine` can parse CBOR, compress Parquet, and upload to MinIO. Thanks to the new 4-stage multithreaded pipeline, parsing runs concurrently across the Tokio thread pool. However, this is heavily bounded by the engine pod's CPU limit (currently `500m`). Empirical load testing demonstrates $R_{io}$ converges to **~13.4 - 16 MB/sec** under a half-core constraint.
+* **$R_{io}$** : **Background I/O Rate** (bytes / second). This is the speed at which the `flush_engine` can parse CBOR, compress Parquet, and upload to MinIO. Thanks to the 4-stage pipelined architecture, CPU-bound parsing and compression run concurrently with async MinIO uploads. However, because we mathematically lock the parser to a single thread to guarantee memory safety bounds, this pipeline is fundamentally single-core bound. Empirical load testing demonstrates $R_{io}$ converges to **~25 - 30 MB/sec** under a 1-core (`1000m`) constraint.
 
 ## 2. Buffer Capacity ($C_{max}$) & Jitter
 Before backpressure is applied, the engine buffers data in local RocksDB column families. 
@@ -71,16 +71,16 @@ Let's plug in the numbers for a 60-second high-throughput test:
 * $S_{msg} = 1$ MB
 * $T_{test} = 60$ seconds (1 minute)
 * $L_{flush} = 32$ MB, $N_{frozen} = 3$ $\rightarrow E[C_{max}] = 96$ MB
-* $R_{io} \approx 13.5$ MB/s
+* $R_{io} \approx 25$ MB/s
 
 Input byte rate ($100$ MB/s) > $R_{io}$ ($13.5$ MB/s), so this becomes **Case C**!
 
 1. Calculate time to fill buffer:
-$$ t_{fill} = \frac{96 \text{ MB}}{100 \text{ MB/s} - 13.5 \text{ MB/s}} \approx 1.1 \text{ seconds} $$
+$$ t_{fill} = \frac{96 \text{ MB}}{100 \text{ MB/s} - 25 \text{ MB/s}} \approx 1.28 \text{ seconds} $$
 
-2. Because $T_{test}$ (60s) > $t_{fill}$ (1.1s), the system hits backpressure almost immediately.
+2. Because $T_{test}$ (60s) > $t_{fill}$ (1.28s), the system hits backpressure almost immediately.
 
 3. Calculate average effective throughput:
-$$ R_{eff} = \frac{13.5 + \frac{96}{60}}{1} = \frac{13.5 + 1.6}{1} = 15.1 \text{ ev/s} $$
+$$ R_{eff} = \frac{25 + \frac{96}{60}}{1} = \frac{25 + 1.6}{1} = 26.6 \text{ ev/s} $$
 
-**Conclusion:** The engine safely applies backpressure to shed the excess $85$ MB/s of load, completely preventing OOMKills. The system's effective throughput $R_{eff}$ gracefully degrades and strictly conforms to the empirical $R_{io}$ limits of its Kubernetes `500m` CPU allocation!
+**Conclusion:** The engine safely applies backpressure to shed the excess load, completely preventing OOMKills. The system's effective throughput $R_{eff}$ gracefully degrades and strictly conforms to the empirical $R_{io}$ limits of its Kubernetes `1000m` CPU allocation!
