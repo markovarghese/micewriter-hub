@@ -60,11 +60,11 @@ Start with the diagonal (moderate stress per cell), then fill in neighbours:
          1 KB    100 KB    1 MB    10 MB
 1/s     [ 1 ]   [ 2 ]    [ 3 ]   [ 4 ]
 10/s    [ 5 ]   [ 6 ]    [ 7 ]   [ 8 ]
-100/s   [ 9 ]   [10 ]    [11 ]   skip
-500/s   [12 ]   [13 ]    skip    skip
+100/s   [ 9 ]   [10 ]    [11 ]   [14 ]
+500/s   [12 ]   [13 ]    [15 ]   [16 ]
 ```
 
-Scenarios marked `skip` are expected to exceed the engine's memory limit given the current 10-minute RocksDB buffer window. Run them only after resource limits are raised experimentally.
+*Note: Scenarios with 10 MB payloads at extreme rates (e.g. Cell 16: 10 MB @ 500/s) are designed to stress the engine beyond its limits and **will OOMKill**. While the 4-stage streaming pipeline bounds memory via `flush_compile_batch_bytes` for typical payloads, pushing 10 MB payloads into 16-slot bounded queues results in hundreds of megabytes of raw + Arrow memory overhead, exceeding the 512 Mi limits. Skip scenarios 14, 15, and 16 during standard sweeps.*
 
 ---
 
