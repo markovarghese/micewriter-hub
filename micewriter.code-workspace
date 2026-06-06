@@ -1,28 +1,52 @@
 {
   "folders": [
     {
-      "name": "micewriter-hub (Design Hub)",
+      "name": "[v2] micewriter-hub (Design Hub)",
       "path": "."
     },
     {
-      "name": "micewriter-engine (Rust Sidecar)",
+      "name": "[v2] micewriter-engine (Rust Sidecar)",
       "path": "../micewriter-engine"
     },
     {
-      "name": "micewriter-sdk-java (Spring Boot Starter)",
+      "name": "[v2] micewriter-sdk-java (Spring Boot Starter)",
       "path": "../micewriter-sdk-java"
     },
     {
-      "name": "micewriter-k8s-injector (Admission Controller)",
+      "name": "[v2] micewriter-k8s-injector (Admission Controller)",
       "path": "../micewriter-k8s-injector"
     },
     {
-      "name": "micewriter-sandbox (Reference Application)",
+      "name": "[v2] micewriter-sandbox (Reference Application)",
       "path": "../micewriter-sandbox"
     },
     {
-      "name": "micewriter-local-infra (Local Data Lake)",
+      "name": "[v2] micewriter-local-infra (Local Data Lake)",
       "path": "../micewriter-local-infra"
+    },
+    {
+      "name": "[v1] micewriter-hub (Design Hub)",
+      "path": "../micewriter-hub-v1"
+    },
+    {
+      "name": "[v1] micewriter-engine (Rust Sidecar)",
+      "path": "../micewriter-engine-v1"
+    },
+    {
+      "name": "[v1] micewriter-sdk-java (Spring Boot Starter)",
+      "path": "../micewriter-sdk-java-v1"
+    },
+    {
+      "name": "[v1] micewriter-k8s-injector (Admission Controller)",
+      "path": "../micewriter-k8s-injector-v1"
+    },
+    {
+      "name": "[v1] micewriter-sandbox (Reference Application)",
+      "path": "../micewriter-sandbox-v1"
+    },
+    {
+      "name": "[v1] micewriter-local-infra (Local Data Lake)",
+      "path": "../micewriter-local-infra-v1"
     }
   ],
   "settings": {
