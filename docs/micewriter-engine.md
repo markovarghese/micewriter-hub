@@ -19,7 +19,8 @@ This repository contains the platform/infrastructure core. It is a highly optimi
 The Sidecar Engine is injected automatically into business application pods. Its primary responsibilities include:
 
 1. **UDS Listener:** It spins up a raw Tokio `UnixListener` on the shared `/var/run/app/iceberg.sock` and instantly writes incoming telemetry payloads into RocksDB, returning microsecond acknowledgments.
-2. **Jittered Cron Loop:** A background Tokio task wakes up every ~10 minutes (with intentional jitter to desynchronize across pods) to compile frozen RocksDB records (CBOR bytes) into Parquet files, and execute catalog commits with exponential backoff.
+2. **Jittered Cron Loop:** A background Tokio task wakes up every ~10 minutes (with intentional jitter to desynchronize across pods) to compile frozen RocksDB records (JSON bytes) into Parquet files, and execute catalog commits with exponential backoff.
+   * **Dynamic Hardware-Aware Scaling:** The engine reads injected pod memory limits and automatically scales its internal thread pool to saturate available CPU cores, while strictly sizing `Arrow` compile batches and `RocksDB` buffers to maintain memory safety on constrained nodes.
    * **Append-Only Reality:** The engine performs fast, append-only operations (via Iceberg's `FastAppendAction`). Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs outside of this sidecar.
    * **End-to-End Testing:** The engine can be configured to accept manual flush requests via the IPC socket by setting `ENABLE_MANUAL_FLUSH=true` (injected globally by the Kubernetes Webhook to ensure production environments remain protected from API abuse).
 3. **Signal Trapping:** It hooks into OS signals to catch Kubernetes `SIGTERM` events, safely draining in-flight UDS connections and forcing an emergency final flush of all local cache to S3 before allowing the pod to die.
