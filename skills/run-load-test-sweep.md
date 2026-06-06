@@ -18,27 +18,23 @@ The file must contain the following Markdown table header:
 ```
 
 ### 2. Start the Sweep
-Trigger the full matrix sweep by sending a `POST` request to `http://k8s-node-1.local/loadtest/sweep`.
-You must provide the full 13-cell payload specified in `docs/load-testing-spec.md` (Section 5.2). 
+Determine the sweep configuration based on the user's request. Identify the following parameters (using defaults if not specified):
+- `durationSec`: Duration of each cell in seconds (default: 900)
+- `restSecondsBetween`: Cool-down period between cells (default: 60)
+- `cells`: Which combinations of `rate` and `payloadSizeBytes` to run (default: the full 13-cell matrix defined in `docs/load-testing-spec.md`).
 
-Example (PowerShell):
+Trigger the sweep by sending a `POST` request to `http://k8s-node-1.local/loadtest/sweep` with the configured payload.
+
+Example (PowerShell, dynamically injecting parameters):
 ```powershell
+$duration = 120  # Replace with actual requested duration
+$rest = 0        # Replace with actual requested rest
+
 $body = @{
-  restSecondsBetween = 60
+  restSecondsBetween = $rest
   cells = @(
-    @{rate=1;   payloadSizeBytes=1024;     durationSec=900},
-    @{rate=1;   payloadSizeBytes=102400;   durationSec=900},
-    @{rate=1;   payloadSizeBytes=1048576;  durationSec=900},
-    @{rate=1;   payloadSizeBytes=10485760; durationSec=900},
-    @{rate=10;  payloadSizeBytes=1024;     durationSec=900},
-    @{rate=10;  payloadSizeBytes=102400;   durationSec=900},
-    @{rate=10;  payloadSizeBytes=1048576;  durationSec=900},
-    @{rate=10;  payloadSizeBytes=10485760; durationSec=900},
-    @{rate=100; payloadSizeBytes=1024;     durationSec=900},
-    @{rate=100; payloadSizeBytes=102400;   durationSec=900},
-    @{rate=100; payloadSizeBytes=1048576;  durationSec=900},
-    @{rate=500; payloadSizeBytes=1024;     durationSec=900},
-    @{rate=500; payloadSizeBytes=102400;   durationSec=900}
+    # Replace this array with the requested cells
+    @{rate=100; payloadSizeBytes=1048576; durationSec=$duration}
   )
 } | ConvertTo-Json -Depth 10
 
@@ -47,12 +43,17 @@ Invoke-RestMethod -Method Post -Uri http://k8s-node-1.local/loadtest/sweep -Cont
 Extract and save the `runId` from the response.
 
 ### 3. Sleep (Optimized Wait)
-Do NOT poll the API repeatedly. The full 13-cell sweep takes exactly 3 hours and 27 minutes (13 * 15m + 12 * 60s). 
-To avoid hitting the `schedule` tool's 900-second maximum duration limit:
-1. Determine the exact local time 3 hours and 30 minutes from now.
-2. Use the `schedule` tool with a specific `CronExpression` for that exact future minute and hour (e.g., if target time is 14:25, use `25 14 * * *`).
-3. Set `MaxIterations=1` so it only fires once.
-4. Set the prompt: `Check loadtest status and dump results for runId: <YOUR_RUN_ID>`.
+Do NOT poll the API repeatedly. Instead, calculate the exact total duration of the sweep mathematically:
+`Total Seconds = (Number of Cells × durationSec) + ((Number of Cells - 1) × restSecondsBetween)`
+
+Once calculated, set an alarm to wake you up when the test finishes. To avoid hitting the `schedule` tool's 900-second maximum duration limit:
+1. **If Total Seconds <= 900**: Use the `schedule` tool directly with `DurationSeconds` set to `Total Seconds + 10`.
+2. **If Total Seconds > 900**:
+   - Determine the exact local time `Total Seconds + 60` from now.
+   - Use the `schedule` tool with a specific `CronExpression` for that exact future minute and hour (e.g., if target time is 14:25, use `25 14 * * *`).
+   - Set `MaxIterations=1` so it only fires once.
+3. Set the prompt: `Check loadtest status and dump results for runId: <YOUR_RUN_ID>`.
+
 After setting the schedule, inform the user that you are sleeping and will return when the test completes, then stop calling tools.
 
 ### 4. Wake Up & Gather Sandbox Results
@@ -74,7 +75,9 @@ For each cell, use your Grafana MCP tools to fetch the engine metrics:
    - **CPU Query**: `rate(container_cpu_usage_seconds_total{container="micewriter-engine"}[1m])`
    - **Memory Query**: `container_memory_working_set_bytes{container="micewriter-engine"}`
 4. **Extract Peak Values**: The MCP server returns an array of values over time. You must manually scan the `data[].values` array to find the highest number.
-5. **Handle "No Data"**: If the query returns empty data or a 'No Data' hint (common for very short testing windows), record the value as `N/A`. Do not repeatedly retry.
+5. **Handle "No Data" and Connection Flakes**: 
+   - If the Grafana Cloud MCP connection fails or drops, retry exactly once. If it fails again, **do not crash or abandon the task**. Record the CPU and Memory values as `N/A` and proceed to step 6.
+   - If the query succeeds but returns empty data or a 'No Data' hint (common for very short testing windows), record the value as `N/A`.
 6. **Standardize Formatting**:
    - **Memory**: Convert the raw bytes to Megabytes (divide by 1024^2) and append `MB` (e.g., `43 MB`).
    - **CPU**: Convert the raw fractional cores to milli-cores (multiply by 1000) and append `m` (e.g., `25m`).
