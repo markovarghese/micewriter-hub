@@ -24,7 +24,7 @@ Secondary outputs:
 
 ## 2. What We Are Measuring
 
-All metrics land in **Grafana Cloud** via the Grafana Alloy DaemonSet already installed cluster-wide ([`k3sonhyperv/ansible/install-k8s-monitoring.yml`](https://github.com/Marko-MV/k3sonhyperv/blob/main/ansible/install-k8s-monitoring.yml)). cAdvisor provides container CPU/memory automatically; pod logs ship to Loki; application-level Prometheus endpoints are scraped via `prometheus.io/scrape` annotations.
+All metrics land in **Grafana Cloud** via the Grafana Alloy DaemonSet already installed cluster-wide ([`k3sonhyperv/ansible/install-k8s-monitoring.yml`](https://github.com/Marko-MV/k3sonhyperv/blob/main/ansible/install-k8s-monitoring.yml)). cAdvisor provides container CPU/memory automatically; pod logs ship to Loki; application-level Prometheus endpoints are scraped via `k8s.grafana.com/scrape` annotations.
 
 | Metric | Source | Query |
 |---|---|---|
