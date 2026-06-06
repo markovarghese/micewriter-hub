@@ -15,7 +15,7 @@ It is a **Maven multi-module project** that ships three artifacts from a single 
 | **dropwizard** | `micewriter-sdk-java-dropwizard` | Dropwizard applications |
 
 ## 🛠️ Core Technology Stack
-- **Language:** Java 17
+- **Language:** Java 25
 - **Framework support:** Spring Boot AutoConfiguration **and** Dropwizard 4.x Bundle
 - **Serialization:** JSON via Jackson `ObjectMapper`
 - **Network IO:** Netty Epoll (UDS communication — Linux only)
