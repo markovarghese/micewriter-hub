@@ -35,7 +35,7 @@ This shifts every one of the four pains:
 | Pain | Where it goes |
 |---|---|
 | **S3 latency** | Out of the hot path entirely. The UDS write returns in microseconds. |
-| **JVM heap pressure** | Off the JVM. Records leave the application as CBOR bytes; buffering happens in RocksDB on a dedicated ephemeral PVC. |
+| **JVM heap pressure** | Off the JVM. Records leave the application as JSON bytes; buffering happens in RocksDB on a dedicated ephemeral PVC. |
 | **Small files** | Solved at the platform layer. The hybrid time/size flush window (10 minutes or 32 MB) batches records into Parquet files sized for analytics. |
 | **Catalog coupling** | One sidecar per pod owns the Glue (or Nessie) commit, with exponential backoff on optimistic-lock failures. |
 

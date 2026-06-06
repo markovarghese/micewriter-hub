@@ -61,7 +61,7 @@ The system is broken down into six repositories along separation-of-concerns lin
 |---|---|---|---|---|
 | 🧭 Meta | 🌐 **`micewriter-hub`** *(this repo)* | Architecture, motivation, feasibility eval — introduces all three lenses | Markdown, Mermaid | [README.md](README.md) |
 | 🛠️ What | 🦀 **`micewriter-engine`** | Memory-safe Rust sidecar managing RocksDB buffer and Iceberg commits | Rust, Tokio, RocksDB, iceberg-rust | [micewriter-engine.md](docs/micewriter-engine.md) |
-| 🛠️ What | ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot + Dropwizard) with Netty UDS transport | Java, Netty, CBOR | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
+| 🛠️ What | ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot + Dropwizard) with Netty UDS transport | Java, Netty, JSON | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
 | 🛠️ What | ☸️ **`micewriter-k8s-injector`** | Mutating Admission Webhook for auto-injection of sidecar + volumes | Go (k8s.io/api), TLS | [micewriter-k8s-injector.md](docs/micewriter-k8s-injector.md) |
 | 🔬 Viable? | 🐳 **`micewriter-local-infra`** | Local data-lake stand-in (MinIO + Nessie) on k3s | Helm, Kubernetes | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |
 | 🔬 Viable? | 🧪 **`micewriter-sandbox`** | Reference Spring Boot app driving load against the local engine | Spring Boot, Docker | [micewriter-sandbox.md](docs/micewriter-sandbox.md) |

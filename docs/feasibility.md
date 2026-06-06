@@ -24,7 +24,7 @@ Before recommending the mIceWriter sidecar to other teams deploying to EKS, one 
 
 Engine resource cost is a function of `(payload_size × event_rate × buffer_window_duration)`. That function is **the same** whether the sidecar runs on EKS or on a k3s VM, because the CPU and memory budget inside the sidecar container is driven by:
 
-- CBOR decode of incoming records
+- JSON decode of incoming records
 - RocksDB writes during the buffer window
 - Parquet compilation at flush time
 - Catalog client serialization

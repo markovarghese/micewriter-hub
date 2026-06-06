@@ -260,7 +260,7 @@ After a manual sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sen
 | Timestamp (UTC) | Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | Peak CPU | Peak Mem | OOMKill? | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-05-31 09:07Z | 1 | 1 KB | 10 | 5 min | 11.9 ms | 10.0 / s | 0 / 3002 | N/A | N/A | No | First validated scenario; engine sidecar at default 512 Mi limits |
-| 2026-05-31 09:07Z | 2 | 100 KB | 10 | 5 min | 12.0 ms | 10.0 / s | 0 / 3002 | N/A | N/A | No | 100× payload, same latency — confirms CBOR+UDS scales linearly through this range |
+| 2026-05-31 09:07Z | 2 | 100 KB | 10 | 5 min | 12.0 ms | 10.0 / s | 0 / 3002 | N/A | N/A | No | 100× payload, same latency — confirms JSON+UDS scales linearly through this range |
 | 2026-05-31 09:07Z | 3 | 10 KB | 100 | 5 min | — | 70.6 / s | 8838 / 30007 (29.5%) | N/A | N/A | **Yes** | **Failure not from sizing.** Engine OOMKilled at 05:12:55 because Nessie 0.69 returned 404 on every flush → RocksDB accumulated unflushable backlog → 512 Mi limit hit. After Nessie chart was upgraded to 0.107.6 (see [`micewriter-local-infra@9f4c7c6`](https://github.com/markovarghese/micewriter-local-infra/commit/9f4c7c6)) and a fresh sandbox pod was deployed, the 10 KB × 100/s scenario should be re-run. |
 | 2026-05-31 09:07Z | 4 | 1 MB | 10 | 5 min | — | 0 / s | 3002 / 3002 (100%) | N/A | N/A | (engine already dead) | Cascade from scenario 3. Engine container had restarted after the OOMKill, but the SDK's UdsConnection did not reconnect; every send timed out at the 5 s ACK timeout. Tracked: [`micewriter-sdk-java#1`](https://github.com/markovarghese/micewriter-sdk-java/issues/1). |
 
@@ -306,7 +306,7 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 | Gap | Impact | Suggested fix |
 |---|---|---|
 | Single-replica only | Catalog contention from concurrent commits across many engine sidecars is not exercised | Phase-2 follow-up: scale the sandbox Deployment to 2–3 replicas (lifting the k8s-node-3 nodeSelector) and re-run one or two cells. See [feasibility.md §4](feasibility.md) for what the local setup does and does not measure. |
-| Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, CBOR decode latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and inject the corresponding scrape annotations via the k8s-injector webhook. |
+| Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, JSON decode latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and inject the corresponding scrape annotations via the k8s-injector webhook. |
 
 ---
 
