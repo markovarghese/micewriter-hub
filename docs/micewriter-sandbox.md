@@ -10,7 +10,7 @@
 This repository acts as the Reference Implementation and the primary testing ground for the entire pipeline. It simulates a standard enterprise microservice.
 
 ## 🛠️ Core Technology Stack
-- **Language/Framework:** Java 17, Spring Boot
+- **Language/Framework:** Java 25, Spring Boot 4
 - **Deployment:** Docker, Skaffold, Kubernetes Manifests
 
 ## ⚙️ Functionality
