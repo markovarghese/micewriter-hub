@@ -47,3 +47,17 @@ To deploy the dashboard:
 1. Copy the `grafana-dashboard.json` file from the `k8s` directory in `micewriter-sandbox`.
 2. Import it into your Grafana Cloud instance.
 3. Ensure your local Kubernetes cluster has Grafana Alloy (or another Prometheus agent) configured to scrape pod metrics and Remote Write them to your Grafana Cloud endpoint.
+
+## Connecting an AI Agent (Grafana MCP)
+
+Several AI workflows in this repo — notably [`skills/run-load-test-sweep.md`](../skills/run-load-test-sweep.md) and the automation pointers in [`load-testing-spec.md`](load-testing-spec.md) §5.2 / §6 — expect an AI agent connected to the **Grafana MCP server**, which exposes tools like `list_datasources`, `query_prometheus`, and `query_loki_logs`.
+
+Use Grafana's hosted endpoint at `https://mcp.grafana.com/mcp` (streamable HTTP, OAuth). Register it once per machine in Claude Code user scope:
+
+```powershell
+claude mcp add --scope user --transport http `
+    grafana https://mcp.grafana.com/mcp `
+    --header "X-Grafana-URL: https://<your-stack>.grafana.net"
+```
+
+First connect opens a browser for OAuth consent against Grafana Cloud — no service account token to manage. The same registration is reused by every `micewriter-*` checkout.
