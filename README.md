@@ -91,6 +91,7 @@ This organizes all codebases into a unified explorer sidebar in your IDE.
 * [Rust sidecar engine](docs/micewriter-engine.md)
 * [Java SDK](docs/micewriter-sdk-java.md)
 * [Kubernetes injector](docs/micewriter-k8s-injector.md)
+* [Observability & Telemetry](docs/observability.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](docs/feasibility.md)

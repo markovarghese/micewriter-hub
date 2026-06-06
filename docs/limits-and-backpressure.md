@@ -26,8 +26,8 @@ Whichever limit is hit first forces the Engine to flush the current Arrow batch 
 
 ### Flush Intervals
 Data is normally flushed based on a jittered cron loop to prevent all microservices from hitting the S3/Nessie catalog simultaneously.
-* **Base Interval**: 10 minutes (`FLUSH_INTERVAL_SECS` = 600)
-* **Jitter**: ± 2 minutes (`FLUSH_JITTER_SECS` = 120)
+* **Base Interval**: 5 minutes (`FLUSH_INTERVAL_SECS` = 300)
+* **Jitter**: ± 1 minute (`FLUSH_JITTER_SECS` = 60)
 * A flush cycle rotates the active RocksDB column family, compiles all frozen CFs, uploads to MinIO, and commits to Nessie.
 
 ## 2. RocksDB Rotation & Backpressure Limits
@@ -56,9 +56,9 @@ To understand the impact of the limits and the backpressure bug, let's explore t
 
 * **Throughput**: 10 KB / sec (0.6 MB / minute).
 * **Payload Limit**: 1 KB is well under the 16 MB limit.
-* **Rotation**: In 10 minutes, the active CF accumulates ~6 MB of data. This is far below the 24–40 MB rotation limit, so size-based rotation never triggers.
-* **Flush Phase**: The periodic timer wakes up every ~8–12 minutes, rotates the 6 MB active CF, and compiles it. The compile batch limits process records in dynamically sized batches, keeping memory safely bounded.
-* **Backpressure**: During the flush, `total_unflushed_bytes` is 6 MB (frozen) + 0 MB (new active). This is well below the 288 MB backpressure limit. 
+* **Rotation**: In 5 minutes, the active CF accumulates ~3 MB of data. This is far below the 24–40 MB rotation limit, so size-based rotation never triggers.
+* **Flush Phase**: The periodic timer wakes up every ~4–6 minutes, rotates the 3 MB active CF, and compiles it. The compile batch limits process records in dynamically sized batches, keeping memory safely bounded.
+* **Backpressure**: During the flush, `total_unflushed_bytes` is 3 MB (frozen) + 0 MB (new active). This is well below the 288 MB backpressure limit. 
 * **Result**: The system runs flawlessly, efficiently batching events and committing them to Iceberg without ever applying backpressure to the host app.
 
 ```mermaid

@@ -91,6 +91,7 @@ This architecture intentionally abstracts away **read-after-write** capabilities
 * [Rust sidecar engine](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
 * [Kubernetes injector](micewriter-k8s-injector.md)
+* [Observability & Telemetry](observability.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](feasibility.md)

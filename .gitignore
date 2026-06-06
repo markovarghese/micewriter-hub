@@ -11,3 +11,9 @@ Desktop.ini
 .vscode/
 *.swp
 *.swo
+
+# Node
+node_modules/
+
+# Untracked files
+scratch-d3/
