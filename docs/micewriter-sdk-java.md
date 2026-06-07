@@ -6,18 +6,25 @@
 [![Component: Java SDK](https://img.shields.io/badge/Component-Java%20SDK-blue?style=flat-square)](#)
 
 This repository contains the Library/SDK that product developers use to interface with the `micewriter-engine` sidecar.
-It is a **Maven multi-module project** that ships three artifacts from a single repo:
+It is a **Maven multi-module project** that ships five artifacts from a single repo:
 
-| Module | Artifact | Use when |
+| Module | Artifact | Purpose |
 |---|---|---|
+| **BOM** | `micewriter-sdk-bom` | Import this into your `<dependencyManagement>` to align versions |
+| **api** | `micewriter-sdk-java-api` | Contains *only* the `@IcebergEntity` and `@IcebergId` annotations. Use this in shared domain libraries! |
 | **core** | `micewriter-sdk-java-core` | Framework-agnostic base — used transitively by both starters |
 | **spring** | `micewriter-sdk-java-spring` | Spring Boot applications |
 | **dropwizard** | `micewriter-sdk-java-dropwizard` | Dropwizard applications |
 
+## 🌿 Branches and Versioning
+The SDK maintains two active release lines depending on your infrastructure:
+- **`2.x.x` (main branch)**: Uses **gRPC over HTTP/2** for central per-table pipelines.
+- **`1.x.x` (v1 branch)**: Uses **Unix Domain Sockets (UDS)** for per-pod sidecars.
+
 ## 🛠️ Core Technology Stack
-- **Language:** Java 25
+- **Language:** Java 17
 - **Framework support:** Spring Boot AutoConfiguration **and** Dropwizard 4.x Bundle
-- **Serialization:** JSON via Jackson `ObjectMapper`
+- **Serialization:** CBOR (Concise Binary Object Representation) via Jackson `CBORFactory`
 - **Network IO:** Netty Epoll (UDS communication — Linux only)
 
 ## ⚙️ Functionality
@@ -30,7 +37,7 @@ This library abstracts away the IPC complexity so business developers just write
    - *Spring Boot*: scans the classpath automatically via `SpringSchemaRegistrar` on `ContextRefreshedEvent`; bounded by `micewriter.base-package`.
    - *Dropwizard*: entity classes are declared explicitly via `MicewriterBundle.entities(...)` because Dropwizard provides no classpath scanner.
 
-3. **`IcebergStreamTemplate`:** Exposes a `.send(pojo)` method that serializes the object into **JSON** bytes and sends it as an `INGEST_RECORD` (0x02) message over the Unix Domain Socket. Blocks until the engine ACKs the RocksDB write (typically microseconds). The template is:
+3. **`IcebergStreamTemplate`:** Exposes a `.send(pojo)` method that serializes the object into **CBOR** bytes and sends it as an `INGEST_RECORD` (0x02) message over the Unix Domain Socket. Blocks until the engine ACKs the RocksDB write (typically microseconds). The template is:
    - A Spring `@Bean` in Spring Boot apps (injected with `@Autowired`).
    - Retrieved via `MicewriterBundle.getTemplate()` in Dropwizard apps.
 
@@ -51,24 +58,37 @@ Every message over the UDS has this layout:
 | Message | Type byte | Payload encoding |
 |---|---|---|
 | `REGISTER_SCHEMA` | `0x01` | JSON `{ table, namespace, fields }` |
-| `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][JSON bytes]` |
+| `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][CBOR bytes]` |
 | `FLUSH_NOW`       | `0x03` | `[Empty Payload]` |
 | ACK (engine → SDK) | — | JSON `{ status: "ok"\|"error", msg? }` |
 
 ## 🏗️ Spring Boot Usage
 
-Add the starter dependency — it auto-configures everything via `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`:
+Add the starter dependency — it auto-configures everything via `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`. We recommend importing the BOM in your `<dependencyManagement>` so you don't have to specify version tags.
 
 ```xml
-<dependency>
-    <groupId>com.micewriter</groupId>
-    <artifactId>micewriter-sdk-java-spring</artifactId>
-    <version>0.2.0</version>
-</dependency>
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>com.micewriter</groupId>
+            <artifactId>micewriter-sdk-bom</artifactId>
+            <version>2.0.0</version> <!-- Use 1.x.x if using the v1 UDS architecture -->
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+
+<dependencies>
+    <dependency>
+        <groupId>com.micewriter</groupId>
+        <artifactId>micewriter-sdk-java-spring</artifactId>
+    </dependency>
+</dependencies>
 ```
 
 ```java
-@IcebergEntity(table = "load_test_events", namespace = {"analytics"})
+@IcebergEntity(table = "telemetry_events", namespace = {"analytics"})
 public class TelemetryEvent {
     @IcebergId private String id;
     private String source;
@@ -97,14 +117,27 @@ micewriter:
 
 ## 🏗️ Dropwizard Usage
 
-Add the bundle dependency — entity classes must be listed explicitly:
+Add the bundle dependency — entity classes must be listed explicitly. Again, we recommend using the BOM:
 
 ```xml
-<dependency>
-    <groupId>com.micewriter</groupId>
-    <artifactId>micewriter-sdk-java-dropwizard</artifactId>
-    <version>0.2.0</version>
-</dependency>
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>com.micewriter</groupId>
+            <artifactId>micewriter-sdk-bom</artifactId>
+            <version>2.0.0</version> <!-- Use 1.x.x if using the v1 UDS architecture -->
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+
+<dependencies>
+    <dependency>
+        <groupId>com.micewriter</groupId>
+        <artifactId>micewriter-sdk-java-dropwizard</artifactId>
+    </dependency>
+</dependencies>
 ```
 
 ```java
@@ -145,7 +178,7 @@ micewriter:
 ```
 
 ## 📦 Output Artifacts
-Three compiled `.jar` files released together at the same version, published to Maven Central, an internal Nexus/Artifactory, or Maven Local.
+Five compiled `.jar` files released together at the same version, published to Maven Central, an internal Nexus/Artifactory, or Maven Local.
 
 ---
 ### 🔗 The mIceWriter Ecosystem
@@ -154,10 +187,11 @@ Three compiled `.jar` files released together at the same version, published to 
 * [Motivation & target adopter](why.md)
 
 **🛠️ What:**
-* [System overview & IPC protocol](system-overview.md)
-* [Rust sidecar engine](micewriter-engine.md)
+* [System overview & wire protocol](system-overview.md)
+* [v2: Per-table pipelines](per-table-pipelines.md)
+* [v1 → v2 migration rationale](v1-to-v2-migration.md)
+* [Rust engine internals](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
-* [Kubernetes injector](micewriter-k8s-injector.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](feasibility.md)
