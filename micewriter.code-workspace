@@ -6,23 +6,23 @@
     },
     {
       "name": "micewriter-engine (Rust Sidecar)",
-      "path": "../micewriter-engine"
+      "path": "../micewriter-engine-v1"
     },
     {
       "name": "micewriter-sdk-java (Spring Boot Starter)",
-      "path": "../micewriter-sdk-java"
+      "path": "../micewriter-sdk-java-v1"
     },
     {
       "name": "micewriter-k8s-injector (Admission Controller)",
-      "path": "../micewriter-k8s-injector"
+      "path": "../micewriter-k8s-injector-v1"
     },
     {
       "name": "micewriter-sandbox (Reference Application)",
-      "path": "../micewriter-sandbox"
+      "path": "../micewriter-sandbox-v1"
     },
     {
       "name": "micewriter-local-infra (Local Data Lake)",
-      "path": "../micewriter-local-infra"
+      "path": "../micewriter-local-infra-v1"
     }
   ],
   "settings": {
