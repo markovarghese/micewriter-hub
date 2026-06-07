@@ -122,3 +122,32 @@ sequenceDiagram
     Flush->>ActiveCF: Drops oldest Frozen CF
     App->>SDK: Next event (Accepted)
 ```
+
+---
+
+## 4. Durability Model
+
+RocksDB here is a **transient local buffer**, not the system of record. A record only becomes durable when the engine **flushes it to Iceberg/MinIO (S3)** on the periodic cycle (§1, ~5 min ± jitter). At any instant there is therefore an in-flight window — up to roughly one flush interval of ingested data — that exists *only* inside the engine and is not yet durable in object storage.
+
+### What an ACK means
+The engine ACKs the SDK after the RocksDB `WriteBatch` commit (`rocksdb_store.rs` `append_batch`), **not** after the S3 flush. So `AckResponse::ok()` means "buffered in the engine," not "durable in Iceberg." The SDK keeps no copy after the ACK (and drops under backpressure — see §2–§3), so this is an intentionally **bounded best-effort** telemetry path, not exactly-once.
+
+### What fsync (`ROCKSDB_SYNC_WRITES`) actually protects
+The WAL is always enabled; `ROCKSDB_SYNC_WRITES` (default **true**) only controls whether each batch is **fsync'd** before the ACK (`rocksdb_store.rs` `wo.set_sync(...)`).
+
+| Failure | fsync **on** | fsync **off** |
+|---|---|---|
+| Engine process crash / OOMKill / container restart (node stays up) | no loss | **no loss** — the WAL write is already in the OS page cache; the kernel survives the process death and RocksDB replays the WAL on restart |
+| Node power loss / kernel panic | unflushed-to-S3 window at risk (see below) | additionally loses the un-fsync'd WAL tail |
+
+So the common failure — the engine container restarting — is covered by **WAL replay regardless of fsync**. fsync only adds protection against a whole-node power loss.
+
+### Why fsync buys little here: the RocksDB volume is pod-ephemeral
+The injector mounts RocksDB on a **generic ephemeral volume** (`micewriter-k8s-injector` `injector.go` `ephemeralVolume()`, storageClass `local-path`): the PVC is **created and destroyed with the pod**, and `local-path` is node-local. So:
+- It survives a **container** restart (which is why crash recovery works) but is **destroyed on pod reschedule**.
+- On the one failure fsync guards against (node power loss / kernel panic), the pod is recreated — typically with a fresh ephemeral PVC and/or on another node — so the **entire buffered RocksDB dataset is lost regardless of fsync**.
+
+Net: in this topology fsync-on protects only the razor-thin case of "power loss but the exact same pod resumes in place on the same node," while costing **~1.5× write throughput** (load-tested, 1 MB payloads: ~235 MB/s with fsync on vs ~347 MB/s with it off — and even fsync-off is then capped by the single-writer/depth-4-channel serialization, not fsync). Whether that trade earns the default is tracked in [`markovarghese/micewriter-engine#2`](https://github.com/markovarghese/micewriter-engine/issues/2).
+
+### If stronger durability is required
+Toggling fsync is the wrong lever in this topology. The effective options are: (a) **shorten the flush interval** to shrink the at-risk window; (b) put RocksDB on a **node-persistent** volume + node affinity so the buffer survives reschedule — *then* fsync genuinely matters; or (c) add **app-side at-least-once** with replay above the SDK.
