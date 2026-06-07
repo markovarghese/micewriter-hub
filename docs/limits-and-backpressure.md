@@ -12,6 +12,9 @@ Both the Java SDK and the Rust Engine enforce a strict `MAX_PAYLOAD_BYTES` limit
 * If a single POJO serializes to > 16 MB, the SDK throws an `IllegalArgumentException` and drops the message before sending it over the Unix Domain Socket.
 * If the Engine receives an IPC frame larger than 16 MB, it drops the connection to prevent memory exhaustion attacks.
 
+### SDK Client-Side In-Flight Window (`sendAsync`)
+The pipelined `IcebergStreamTemplate.sendAsync()` path keeps multiple records in flight before their ACKs, so it needs its own memory guard. The SDK caps the total bytes of un-ACKed sends at **`max-in-flight-bytes`** (default **8 MiB**). When the window is full, the calling thread blocks until inbound ACKs free space — *client-side* backpressure that throttles the producer **before** records accumulate in the host-app heap. This bounds the SDK's footprint regardless of how far behind the engine falls. (The blocking `send()` path is implicitly limited to a single record in flight.) This limit is independent of, and sits upstream from, the engine-side backpressure in §2 — note it bounds **memory, not CPU**: a host pushing N records/sec still pays N records/sec of serialization cost.
+
 ### RocksDB Write Batching Limits
 To efficiently persist incoming IPC records, the UDS server opportunistically batches messages before appending them to the active RocksDB column family. A write batch is flushed to disk when it reaches either:
 * **`WRITE_BATCH_MAX`**: **1,000 records**.
@@ -92,7 +95,7 @@ sequenceDiagram
 * **Healthy Backpressure in Action**:
   1. Because the host application generates data faster (100 MB/s) than the engine can process it (~62 MB/s), the engine begins accumulating frozen CFs.
   2. Within ~6.7 seconds, the `MAX_RETAINED_FROZEN_CFS` limit of 8 (and the 288 MB shadow limit) is hit.
-  3. The engine begins rejecting IPC requests with a "backpressure" error. The SDK catches these and gracefully drops the excess events.
+  3. The engine begins rejecting IPC requests with a "backpressure" error. With `send()` the SDK surfaces this as a `RuntimeException` (the caller decides to drop); with `sendAsync()` the client-side in-flight window (§1) has usually already throttled the producer before the engine even has to reject.
   4. The host application continues to run without experiencing OOM crashes or thread-pool exhaustion!
 * **Result**: The engine smoothly sustains ~62 MB/s of ingestion without dropping the pod, gracefully shedding the excess 38 MB/s load via backpressure.
 

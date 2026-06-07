@@ -22,9 +22,9 @@ The SDK maintains two active release lines depending on your infrastructure:
 - **`1.x.x` (v1 branch)**: Uses **Unix Domain Sockets (UDS)** for per-pod sidecars.
 
 ## 🛠️ Core Technology Stack
-- **Language:** Java 17
+- **Language:** Java 25
 - **Framework support:** Spring Boot AutoConfiguration **and** Dropwizard 4.x Bundle
-- **Serialization:** CBOR (Concise Binary Object Representation) via Jackson `CBORFactory`
+- **Serialization:** JSON via Jackson `ObjectMapper` (streamed directly into the UDS frame buffer)
 - **Network IO:** Netty Epoll (UDS communication — Linux only)
 
 ## ⚙️ Functionality
@@ -37,7 +37,11 @@ This library abstracts away the IPC complexity so business developers just write
    - *Spring Boot*: scans the classpath automatically via `SpringSchemaRegistrar` on `ContextRefreshedEvent`; bounded by `micewriter.base-package`.
    - *Dropwizard*: entity classes are declared explicitly via `MicewriterBundle.entities(...)` because Dropwizard provides no classpath scanner.
 
-3. **`IcebergStreamTemplate`:** Exposes a `.send(pojo)` method that serializes the object into **CBOR** bytes and sends it as an `INGEST_RECORD` (0x02) message over the Unix Domain Socket. Blocks until the engine ACKs the RocksDB write (typically microseconds). The template is:
+3. **`IcebergStreamTemplate`:** The primary ingest API, with two send modes that both serialize the POJO to **JSON** streamed straight into the `INGEST_RECORD` (0x02) frame:
+   - **`.send(pojo)`** — *blocking*. Waits for the engine ACK before returning, so a single calling thread keeps only one record in flight. Simple, but latency-bound: for 1 MB payloads a single thread tops out at **~100 records/s** regardless of the offered rate.
+   - **`.sendAsync(pojo)`** — *pipelined*. Returns a `CompletableFuture<Void>` and keeps many frames in flight (ACK ordering preserved by a FIFO queue), lifting the single-caller ceiling well past the synchronous limit (**measured ~5×** for 1 MB payloads). Host memory is bounded by a configurable **in-flight byte budget** (`max-in-flight-bytes`, default **8 MiB**): the caller blocks only when the window is full — which is also how the SDK applies *client-side* backpressure. Errors (timeout, channel drop, engine rejection) complete the future exceptionally rather than throwing on the caller. See [System Limits and Backpressure](limits-and-backpressure.md).
+
+   The template is:
    - A Spring `@Bean` in Spring Boot apps (injected with `@Autowired`).
    - Retrieved via `MicewriterBundle.getTemplate()` in Dropwizard apps.
 
@@ -58,7 +62,7 @@ Every message over the UDS has this layout:
 | Message | Type byte | Payload encoding |
 |---|---|---|
 | `REGISTER_SCHEMA` | `0x01` | JSON `{ table, namespace, fields }` |
-| `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][CBOR bytes]` |
+| `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][JSON bytes]` |
 | `FLUSH_NOW`       | `0x03` | `[Empty Payload]` |
 | ACK (engine → SDK) | — | JSON `{ status: "ok"\|"error", msg? }` |
 
@@ -112,6 +116,7 @@ micewriter:
   base-package: com.example.events   # narrows @IcebergEntity classpath scan
   connect-timeout-ms: 5000
   ack-timeout-ms: 5000
+  max-in-flight-bytes: 8388608       # 8 MiB client-side in-flight window for sendAsync()
   enabled: true
 ```
 
@@ -175,6 +180,7 @@ micewriter:
   socketPath: /var/run/app/iceberg.sock
   connectTimeoutMs: 5000
   ackTimeoutMs: 5000
+  maxInFlightBytes: 8388608   # 8 MiB client-side in-flight window for sendAsync()
 ```
 
 ## 📦 Output Artifacts
