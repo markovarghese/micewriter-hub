@@ -75,19 +75,34 @@ For the v1 line the file is `../micewriter-sandbox-v1/load-tests/results/results
 
 The 13 non-skip cells of the test matrix (1/10/100/500 ev/s × 1 KB/100 KB/1 MB/10 MB), `durationSec` 900, `restSecondsBetween` 60. Total ≈ `(cells × durationSec) + ((cells-1) × rest)` ≈ 3.5 h.
 
+Do **NOT** pass all cells to `/loadtest/sweep` in a single request — the sandbox pre-allocates templates for all cells concurrently, which will cause a `java.lang.OutOfMemoryError` on large payloads. 
+
+Instead, iterate through the matrix using a PowerShell script and call `skills/run-load-cell.ps1` for each cell sequentially:
+
 ```powershell
-# cells array for /loadtest/sweep
-@(
-  @{rate=1;   payloadSizeBytes=1024},   @{rate=1;   payloadSizeBytes=102400},
-  @{rate=1;   payloadSizeBytes=1048576},@{rate=1;   payloadSizeBytes=10485760},
-  @{rate=10;  payloadSizeBytes=1024},   @{rate=10;  payloadSizeBytes=102400},
-  @{rate=10;  payloadSizeBytes=1048576},@{rate=10;  payloadSizeBytes=10485760},
-  @{rate=100; payloadSizeBytes=1024},   @{rate=100; payloadSizeBytes=102400},
-  @{rate=100; payloadSizeBytes=1048576},
-  @{rate=500; payloadSizeBytes=1024},   @{rate=500; payloadSizeBytes=102400}
-)  # add durationSec=900 to each
+# Iterate one-by-one to avoid sandbox OOM
+$cells = @(
+  @{rate=1;   payloadSizeBytes=1024;     durationSec=900},
+  @{rate=1;   payloadSizeBytes=102400;   durationSec=900},
+  @{rate=1;   payloadSizeBytes=1048576;  durationSec=900},
+  @{rate=1;   payloadSizeBytes=10485760; durationSec=900},
+  @{rate=10;  payloadSizeBytes=1024;     durationSec=900},
+  @{rate=10;  payloadSizeBytes=102400;   durationSec=900},
+  @{rate=10;  payloadSizeBytes=1048576;  durationSec=900},
+  @{rate=10;  payloadSizeBytes=10485760; durationSec=900},
+  @{rate=100; payloadSizeBytes=1024;     durationSec=900},
+  @{rate=100; payloadSizeBytes=102400;   durationSec=900},
+  @{rate=100; payloadSizeBytes=1048576;  durationSec=900},
+  @{rate=500; payloadSizeBytes=1024;     durationSec=900},
+  @{rate=500; payloadSizeBytes=102400;   durationSec=900}
+)
+
+foreach ($c in $cells) {
+    & "skills\run-load-cell.ps1" -Rate $c.rate -PayloadBytes $c.payloadSizeBytes -DurationSec $c.durationSec -RestSec 60
+}
 ```
-On the main thread, start the sweep, compute total seconds, and set one wake-up for `total + buffer` (don't poll): if total ≤ 900 s use a `ScheduleWakeup`/`schedule` of `total+10`; if > 900 s schedule a one-shot for the exact future minute. On wake, collect each cell's window from the single `GET /loadtest/{runId}` and the Grafana queries above.
+
+Run this loop script in the background. The `run-load-cell.ps1` script will handle the blocking wait and print the formatted markdown table row for each cell. You will be automatically notified when the background task completes, at which point you can collect all the printed rows and append them to `results.md`.
 
 ---
 

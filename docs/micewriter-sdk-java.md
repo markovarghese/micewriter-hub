@@ -1,7 +1,7 @@
 # ☕ micewriter-sdk-java
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: Java SDK](https://img.shields.io/badge/Component-Java%20SDK-blue?style=flat-square)](#)
 

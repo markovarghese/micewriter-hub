@@ -1,7 +1,7 @@
 # 🔬 Feasibility Evaluation
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
 
 This document explains why the local k3s stack, the reference sandbox application, and the load-testing specification exist and how they combine into a single evaluation flow that answers one question: **is the engine cheap enough at the throughputs and payload sizes we expect to recommend to other EKS teams?**

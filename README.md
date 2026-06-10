@@ -1,7 +1,7 @@
 # 📥 micewriter-hub
 > 🌐 Architecture, motivation, and feasibility evaluation for the **mIceWriter Ingestion Ecosystem** — a sidecar that lets EKS-deployed apps persist to Apache Iceberg without blocking the hot path or burdening their JVM.
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](README.md)
 [![Component: Central Hub](https://img.shields.io/badge/Component-Central%20Hub-brightgreen?style=flat-square)](#)
 
 mIceWriter is an **opt-in sidecar** for applications running on AWS EKS (or any Kubernetes cluster) that need to persist telemetry, audit, or model-payload data to Apache Iceberg tables — without paying S3 latency on the hot path, without buffering large payloads in their own JVM heap, and without flooding S3 with tiny files that ruin downstream query performance.

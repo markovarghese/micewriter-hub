@@ -5,14 +5,14 @@
   Grafana Cloud over the exact run window. Prints a ready-to-fill results.md row.
 
   This is the MECHANICAL half of the run-load-test-sweep skill. It spends zero
-  model tokens — run it directly, or have a cheap model / sub-agent invoke it.
+  model tokens - run it directly, or have a cheap model / sub-agent invoke it.
   The ORCHESTRATOR (capable model) still does pre-flight verification and
   interprets the numbers (see run-load-test-sweep.md).
 
 .DESCRIPTION
   Sandbox load-test endpoints are unauthenticated on the local cluster, so the
   POST/wait/GET/dump part needs no secrets. The Grafana part is OPTIONAL and
-  reads credentials from environment variables — nothing is hardcoded:
+  reads credentials from environment variables - nothing is hardcoded:
     GRAFANA_PROM_URL   Prometheus base that exposes /api/v1/query_range
                        (Grafana Cloud example: https://prometheus-prod-XX-REGION.grafana.net/api/prom)
     GRAFANA_TOKEN      Access-policy / API token
@@ -38,7 +38,7 @@ param(
     [string]$Namespace = "micewriter-sandbox",
     [string]$EngineContainer = "micewriter-engine",
     [int]$PollSec = 5,
-    [int]$BufferSec = 60   # extra wait beyond DurationSec before giving up
+    [int]$BufferSec = 60
 )
 
 Set-StrictMode -Version Latest
@@ -110,20 +110,24 @@ if ($env:GRAFANA_PROM_URL) {
         Write-Warning "Grafana query failed ($_). Recording peaks as N/A."
     }
 } else {
-    Write-Host "`n[Grafana] GRAFANA_PROM_URL not set — skipping HTTP query. Fetch peaks via MCP for window:"
-    Write-Host "  start=$([datetimeoffset]::FromUnixTimeSeconds($startUnix).ToString('o'))  end=$([datetimeoffset]::FromUnixTimeSeconds($endUnix).ToString('o'))"
-    Write-Host "  CPU peak PromQL: max_over_time($cpuExpr[5m:15s])"
-    Write-Host "  Mem peak PromQL: max_over_time($memExpr[5m:15s])"
+    Write-Host ""
+    Write-Host "[Grafana] GRAFANA_PROM_URL not set - skipping HTTP query. Fetch peaks via MCP for window:"
+    $strStart = [datetimeoffset]::FromUnixTimeSeconds($startUnix).ToString('o')
+    $strEnd = [datetimeoffset]::FromUnixTimeSeconds($endUnix).ToString('o')
+    Write-Host ("  start={0}  end={1}" -f $strStart, $strEnd)
+    Write-Host ('  CPU peak PromQL: max_over_time({0}[5m:15s])' -f $cpuExpr)
+    Write-Host ('  Mem peak PromQL: max_over_time({0}[5m:15s])' -f $memExpr)
 }
 
 # ---------------------------------------------------------------------------
 # 4. Ready-to-fill results.md row (orchestrator edits Scenario / OOMKill? / Notes)
 # ---------------------------------------------------------------------------
 $ts        = [datetimeoffset]::Parse($cell.startedAt).ToString("yyyy-MM-ddTHH:mm:ssZ")
-$sizeLabel = if ($PayloadBytes -ge 1MB) { "$([math]::Round($PayloadBytes/1MB)) MB" } elseif ($PayloadBytes -ge 1KB) { "$([math]::Round($PayloadBytes/1KB)) KB" } else { "$PayloadBytes B" }
+if ($PayloadBytes -ge 1MB) { $sizeLabel = "{0} MB" -f [math]::Round($PayloadBytes/1MB) } elseif ($PayloadBytes -ge 1KB) { $sizeLabel = "{0} KB" -f [math]::Round($PayloadBytes/1KB) } else { $sizeLabel = "{0} B" -f $PayloadBytes }
 $p95       = "{0:N1} ms" -f $cell.p95LatMs
 $achieved  = "{0:N1} / s" -f $cell.achievedRate
 $failed    = "{0} / {1}" -f $cell.failed, ($cell.sent + $cell.failed)
 
-Write-Host "`n===== results.md row (fill Scenario / OOMKill? / Notes) ====="
-"| $ts | <SCENARIO> | $sizeLabel | $Rate | ${DurationSec}s | $p95 | $achieved | $failed | $peakCpu | $peakMem | <OOMKill?> | <notes> |"
+Write-Host ""
+Write-Host "===== results.md row ====="
+Write-Host ('| {0} | <SCENARIO> | {1} | {2} | {3}s | {4} | {5} | {6} | {7} | {8} | <OOMKill?> | <notes> |' -f $ts, $sizeLabel, $Rate, $DurationSec, $p95, $achieved, $failed, $peakCpu, $peakMem)

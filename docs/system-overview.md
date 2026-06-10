@@ -1,7 +1,7 @@
 # 🌐 System Overview
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: System Overview](https://img.shields.io/badge/Component-System%20Overview-lightgrey?style=flat-square)](#)
 

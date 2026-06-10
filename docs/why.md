@@ -1,7 +1,7 @@
 # 🎯 Why mIceWriter Exists
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: Why](https://img.shields.io/badge/Lens-Why-red?style=flat-square)](#)
 
 This document explains the problem mIceWriter exists to solve, who it is for, what it deliberately does not do, and how it is shaped for production. If you are deciding whether to adopt the sidecar in your own application, start here.

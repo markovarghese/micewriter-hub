@@ -1,7 +1,7 @@
 # 🐳 micewriter-local-infra
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
 [![Component: Local Infrastructure](https://img.shields.io/badge/Component-Local%20Infrastructure-green?style=flat-square)](#)
 
