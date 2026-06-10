@@ -17,22 +17,22 @@ Here is the formula to calculate the system's average effective throughput ($R_{
 
 ### System Limit Variables
 * **$L_{payload}$** : `MAX_PAYLOAD_BYTES` (16 MB limit per message)
-* **$L_{flush}$** : `flush_size_bytes` (Target active CF rotation size, e.g., 32 MB)
-* **$N_{frozen}$** : `MAX_RETAINED_FROZEN_CFS` (Max pending flushes, default: 8)
-* **$R_{io}$** : **Background I/O Rate** (bytes / second). This is the speed at which the `flush_engine` can parse JSON, compress Parquet, and upload to MinIO. Thanks to dynamic hardware-aware scaling, $R_{io}$ is a function of $N_{cpu}$ and $M_{limit}$:
-  * $N_{cpu}$ dictates the number of concurrent `parser_threads` processing JSON in parallel.
-  * $M_{limit}$ determines `concurrent_cf_flushes` (1 pipeline per 256MB of RAM) and bounds `flush_compile_batch_bytes` to guarantee memory safety.
-  * Together, they allow $R_{io}$ to scale dynamically. Empirical load testing demonstrates $R_{io} \approx 62$ MB/s on a highly constrained single-core ($N_{cpu} = 1$) 512 MiB sandbox, and scales linearly on multi-core nodes.
+* **$L_{flush}$** : `flush_size_bytes` (Target active CF rotation size, e.g., 128 MB)
+* **$N_{frozen}$** : `MAX_RETAINED_FROZEN_CFS` (Max pending flushes, default: 2)
+* **$R_{io}$** : **Background I/O Rate** (bytes / second). This is the speed at which the `flush_engine` can stream Arrow IPC data to MinIO as Parquet. Thanks to dynamic hardware-aware scaling, $R_{io}$ is a function of $N_{cpu}$ and $M_{limit}$:
+  * $N_{cpu}$ dictates the number of concurrent flush pipelines.
+  * $M_{limit}$ bounds pipeline queue depths to guarantee memory safety.
+  * Together, they allow $R_{io}$ to scale dynamically. Empirical load testing demonstrates $R_{io} \approx 74$ MB/s on a highly constrained `conc=2` 512 MiB sandbox, and scales linearly on multi-core/higher memory nodes.
 
 ## 2. Buffer Capacity ($C_{max}$) & Jitter
 Before backpressure is applied, the engine buffers data in local RocksDB column families. 
 
-While there is a hard global bytes limit ($L_{flush} \times (1 + N_{frozen})$ = 128 MB), the code in `uds_server.rs` actually triggers backpressure the moment the number of frozen CFs reaches $N_{frozen}$ (`retained >= max_retained_frozen_cfs`). Because of this, the active CF is not allowed to fill up once $N_{frozen}$ is reached!
+While there is a hard global bytes limit ($L_{flush} \times (1 + N_{frozen})$ = 384 MB), the code in `uds_server.rs` actually triggers backpressure the moment the number of frozen CFs reaches $N_{frozen}$ (`retained >= max_retained_frozen_cfs`). Because of this, the active CF is not allowed to fill up once $N_{frozen}$ is reached!
 
-Furthermore, rotation sizes are subject to **Jitter** (`flush_size_jitter_bytes` = 8 MB). Each CF rotates at a uniformly random size between 24 MB and 40 MB. Because the true buffer capacity $C_{max}$ is the sum of $N_{frozen}$ random variables, it follows an Irwin-Hall distribution. However, for calculating *average* throughput over a time window, we use the expected value (mean):
+Furthermore, rotation sizes are subject to **Jitter** (`flush_size_jitter_bytes` = 8 MB). Each CF rotates at a uniformly random size between 120 MB and 136 MB. Because the true buffer capacity $C_{max}$ is the sum of $N_{frozen}$ random variables, it follows an Irwin-Hall distribution. However, for calculating *average* throughput over a time window, we use the expected value (mean):
 
 $$ E[C_{max}] = L_{flush} \times N_{frozen} $$
-*(With defaults: 32 MB * 8 = 256 MB)*
+*(With defaults: 128 MB * 2 = 256 MB)*
 
 ---
 
@@ -61,7 +61,7 @@ The test ends before the buffer is exhausted. Backpressure never triggers.
 $$ R_{eff} = R_{in} $$
 
 **If $T_{test} > t_{fill}$ :**
-The system accepts traffic freely for the first $t_{fill}$ seconds. Once the 3 retained CFs limit is hit (at expected ~96 MB), backpressure activates and the ingestion rate is strictly hard-capped to the background drain rate ($R_{io}$). 
+The system accepts traffic freely for the first $t_{fill}$ seconds. Once the 2 retained CFs limit is hit (at expected ~256 MB), backpressure activates and the ingestion rate is strictly hard-capped to the background drain rate ($R_{io}$). 
 
 The total bytes accepted over the entire window is the full buffer capacity ($E[C_{max}]$) plus whatever the background engine managed to process and drain during that time ($R_{io} \times T_{test}$). Dividing this by the time window and message size yields the average effective messages/sec:
 
@@ -77,17 +77,17 @@ Let's plug in the numbers for a 60-second high-throughput test:
 * $R_{in} = 100$ ev/s
 * $S_{msg} = 1$ MB
 * $T_{test} = 60$ seconds (1 minute)
-* $L_{flush} = 32$ MB, $N_{frozen} = 8$ $\rightarrow E[C_{max}] = 256$ MB
-* $R_{io} \approx 62$ MB/s
+* $L_{flush} = 128$ MB, $N_{frozen} = 2$ $\rightarrow E[C_{max}] = 256$ MB
+* $R_{io} \approx 74$ MB/s
 
-Input byte rate ($100$ MB/s) > $R_{io}$ ($62$ MB/s), so this becomes **Case C**!
+Input byte rate ($100$ MB/s) > $R_{io}$ ($74$ MB/s), so this becomes **Case C**!
 
 1. Calculate time to fill buffer:
-$$ t_{fill} = \frac{256 \text{ MB}}{100 \text{ MB/s} - 62 \text{ MB/s}} \approx 6.74 \text{ seconds} $$
+$$ t_{fill} = \frac{256 \text{ MB}}{100 \text{ MB/s} - 74 \text{ MB/s}} \approx 9.85 \text{ seconds} $$
 
-2. Because $T_{test}$ (60s) > $t_{fill}$ (6.74s), the system hits backpressure after about 6.7 seconds.
+2. Because $T_{test}$ (60s) > $t_{fill}$ (9.85s), the system hits backpressure after about 9.85 seconds.
 
 3. Calculate average effective throughput:
-$$ R_{eff} = \frac{62 + \frac{256}{60}}{1} = \frac{62 + 4.26}{1} \approx 66.26 \text{ ev/s} $$
+$$ R_{eff} = \frac{74 + \frac{256}{60}}{1} = \frac{74 + 4.26}{1} \approx 78.26 \text{ ev/s} $$
 
-**Conclusion:** The engine safely applies backpressure to shed the excess load, completely preventing OOMKills. Thanks to dynamic parameter scaling and an 8-CF buffer depth, the system's effective throughput $R_{eff}$ gracefully degrades to a staggering **~66.26 MB/s**, perfectly matching the hardware capacity without memory corruption!
+**Conclusion:** The engine safely applies backpressure to shed the excess load, completely preventing OOMKills. Thanks to dynamic parameter scaling and bounded queue depths, the system's effective throughput $R_{eff}$ gracefully degrades to a staggering **~78.26 MB/s**, perfectly matching the hardware capacity without memory corruption!
