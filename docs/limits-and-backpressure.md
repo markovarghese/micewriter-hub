@@ -74,7 +74,7 @@ sequenceDiagram
     participant Iceberg
     App->>SDK: Send 1 KB event (10/sec)
     SDK->>UDS: IPC Message (1 KB)
-    UDS->>ActiveCF: Append (Total unflushed under 32 MB)
+    UDS->>ActiveCF: Append (Total unflushed under 128 MB)
     ActiveCF-->>UDS: OK
     UDS-->>SDK: AckResponse::ok()
     Note over ActiveCF,Flush: In 10 mins, Active CF reaches 6 MB
@@ -109,12 +109,12 @@ sequenceDiagram
     App->>SDK: Send 1 MB events (100 MB/s)
     SDK->>UDS: IPC Messages (1 MB)
     UDS->>ActiveCF: Append
-    Note over ActiveCF,Flush: Active CF hits 32 MB and rotates
+    Note over ActiveCF,Flush: Active CF hits 128 MB and rotates
     Flush->>Flush: Dynamic Multi-Threaded Pipeline
-    Note over ActiveCF,Flush: Pipeline drains data at ~62 MB/s
+    Note over ActiveCF,Flush: Pipeline streams data at ~74 MB/s
     App->>SDK: Send next 1 MB event
     SDK->>UDS: IPC Message
-    Note over UDS: Retained CF limit is hit (288 MB backlog)!
+    Note over UDS: Retained CF limit is hit (256 MB backlog)!
     UDS-->>SDK: AckResponse::error(backpressure)
     SDK-->>App: Drop event (graceful degradation)
     Note over App,UDS: Host app avoids OOM.
