@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 400" font-family="'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="System Data Flow">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#64748b"/></marker>
+    <marker id="arrowTeal" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#2dd4bf"/></marker>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f172a"/><stop offset="1" stop-color="#0b1322"/></linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="400" fill="url(#bgGrad)"/>
+  <text x="40" y="40" fill="#e2e8f0" font-size="22" font-weight="700">mIceWriter Data Flow</text>
+
+  <!-- App -->
+  <rect x="50" y="150" width="140" height="80" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="120" y="185" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">Business App</text>
+  <text x="120" y="205" fill="#94a3b8" font-size="10" text-anchor="middle">Java SDK</text>
+
+  <!-- Engine (uds_server) -->
+  <rect x="280" y="150" width="160" height="80" rx="10" fill="#1e293b" stroke="#c084fc" stroke-width="1.5"/>
+  <text x="360" y="185" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">Engine Intake</text>
+  <text x="360" y="205" fill="#94a3b8" font-size="10" text-anchor="middle">JSON &#8594; Arrow IPC</text>
+
+  <!-- RocksDB -->
+  <rect x="530" y="150" width="140" height="80" rx="10" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="600" y="185" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">RocksDB</text>
+  <text x="600" y="205" fill="#94a3b8" font-size="10" text-anchor="middle">Durable Active CF</text>
+
+  <!-- S3 -->
+  <rect x="760" y="100" width="140" height="80" rx="10" fill="#11241f" stroke="#2dd4bf" stroke-width="1.5"/>
+  <text x="830" y="135" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">MinIO S3</text>
+  <text x="830" y="155" fill="#94a3b8" font-size="10" text-anchor="middle">Parquet Stream</text>
+
+  <!-- Nessie -->
+  <rect x="760" y="220" width="140" height="80" rx="10" fill="#134e4a" stroke="#2dd4bf" stroke-width="1.5"/>
+  <text x="830" y="255" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">Apache Nessie</text>
+  <text x="830" y="275" fill="#94a3b8" font-size="10" text-anchor="middle">Iceberg Catalog</text>
+
+  <path d="M190,190 L270,190" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="230" y="180" fill="#94a3b8" font-size="10" text-anchor="middle">UDS</text>
+
+  <path d="M440,190 L520,190" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="480" y="180" fill="#94a3b8" font-size="10" text-anchor="middle">IPC Bytes</text>
+
+  <path d="M670,180 L750,140" fill="none" stroke="#2dd4bf" stroke-width="2" marker-end="url(#arrowTeal)"/>
+  <text x="710" y="150" fill="#5eead4" font-size="10" text-anchor="middle">Upload</text>
+
+  <path d="M670,200 L750,260" fill="none" stroke="#2dd4bf" stroke-width="2" marker-end="url(#arrowTeal)"/>
+  <text x="710" y="250" fill="#5eead4" font-size="10" text-anchor="middle">Commit</text>
+
+  <circle r="4.5" fill="#7dd3fc"><animateMotion dur="1.5s" repeatCount="indefinite" path="M190,190 L270,190"/></circle>
+  <circle r="4.5" fill="#a5b4fc"><animateMotion dur="1.5s" repeatCount="indefinite" path="M440,190 L520,190"/></circle>
+  <circle r="4.5" fill="#5eead4"><animateMotion dur="2s" repeatCount="indefinite" path="M670,180 L750,140"/></circle>
+  <circle r="4.5" fill="#5eead4"><animateMotion dur="2s" repeatCount="indefinite" path="M670,200 L750,260"/></circle>
+</svg>

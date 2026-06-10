@@ -51,7 +51,7 @@ Because the Retained CF Count triggers the moment the 2nd CF is frozen, the acti
 
 ## 3. Scenarios Walkthrough
 
-![Data Flow Architecture](./diagrams/data-flow.drawio.svg)
+![Data Flow Architecture](./diagrams/data-flow.svg)
 
 To understand the impact of the limits and the backpressure bug, let's explore two throughput scenarios.
 
