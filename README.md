@@ -28,28 +28,7 @@ If you are deciding whether to adopt the sidecar in your own application, start 
 
 The system operates entirely within the Kubernetes pod networking boundary, ensuring zero network latency for the business application during data emission:
 
-```mermaid
-graph TD
-    subgraph K8sPod ["Kubernetes Pod Boundary"]
-        App["Spring Boot App Container"] -->|Netty / Epoll UDS| UDS["Unix Domain Socket<br/>(/var/run/app/iceberg.sock)"]
-        UDS -->|Tokio UnixListener| Engine["mIceWriter Engine (Rust Container)"]
-        Engine -->|RocksDB Crate| RocksDB[("Isolated RocksDB Cache<br/>(Generic Ephemeral PVC)")]
-    end
-
-    subgraph K8sCluster ["Kubernetes Cluster Services (or AWS)"]
-        Catalog[("Apache Nessie / AWS Glue Catalog")]
-        ObjectStore[("MinIO / AWS S3 Object Store")]
-        Webhook["Mutating Webhook Injector"]
-    end
-
-    Engine -->|Catalog API| Catalog
-    Engine -->|S3 Upload API| ObjectStore
-    Webhook -.->|Auto-injects Sidecar & PVCs| K8sPod
-
-    style K8sPod fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style K8sCluster fill:#f5f7fa,stroke:#4a5568,stroke-width:1px
-    style RocksDB fill:#e2e8f0,stroke:#4a5568,stroke-width:1px
-```
+![System Topology](docs/diagrams/system-topology.svg)
 
 ---
 

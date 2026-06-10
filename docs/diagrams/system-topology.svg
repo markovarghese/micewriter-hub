@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 500" font-family="'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="System Topology">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#64748b"/></marker>
+    <marker id="arrowTeal" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#2dd4bf"/></marker>
+    <marker id="arrowPurple" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#c084fc"/></marker>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f172a"/><stop offset="1" stop-color="#0b1322"/></linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="500" fill="url(#bgGrad)"/>
+  <text x="40" y="40" fill="#e2e8f0" font-size="22" font-weight="700">mIceWriter System Topology</text>
+
+  <!-- K8s Pod -->
+  <rect x="50" y="80" width="500" height="340" rx="10" fill="#15202f" stroke="#475569" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="60" y="110" fill="#94a3b8" font-size="14" font-weight="600">Kubernetes Pod Boundary</text>
+
+  <!-- App -->
+  <rect x="80" y="140" width="160" height="80" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="160" y="175" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">Spring Boot App</text>
+  <text x="160" y="195" fill="#94a3b8" font-size="10" text-anchor="middle">Netty / Epoll UDS</text>
+
+  <!-- UDS -->
+  <rect x="300" y="140" width="160" height="80" rx="10" fill="#1e293b" stroke="#64748b" stroke-width="1.5"/>
+  <text x="380" y="175" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">Unix Domain Socket</text>
+  <text x="380" y="195" fill="#94a3b8" font-size="10" text-anchor="middle">/var/run/app/iceberg.sock</text>
+
+  <!-- Engine -->
+  <rect x="300" y="300" width="160" height="80" rx="10" fill="#1e293b" stroke="#c084fc" stroke-width="1.5"/>
+  <text x="380" y="335" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">mIceWriter Engine</text>
+  <text x="380" y="355" fill="#94a3b8" font-size="10" text-anchor="middle">Rust Sidecar Container</text>
+
+  <!-- RocksDB -->
+  <rect x="80" y="300" width="160" height="80" rx="10" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="160" y="335" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">RocksDB Cache</text>
+  <text x="160" y="355" fill="#94a3b8" font-size="10" text-anchor="middle">Ephemeral PVC</text>
+
+  <!-- External Cluster / AWS -->
+  <rect x="620" y="80" width="500" height="340" rx="10" fill="#15202f" stroke="#475569" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="630" y="110" fill="#94a3b8" font-size="14" font-weight="600">Kubernetes Cluster Services (or AWS)</text>
+
+  <!-- Webhook -->
+  <rect x="650" y="140" width="180" height="80" rx="10" fill="#1e293b" stroke="#f472b6" stroke-width="1.5"/>
+  <text x="740" y="175" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">Mutating Webhook</text>
+  <text x="740" y="195" fill="#94a3b8" font-size="10" text-anchor="middle">Injector</text>
+
+  <!-- Catalog -->
+  <rect x="880" y="220" width="180" height="80" rx="10" fill="#134e4a" stroke="#2dd4bf" stroke-width="1.5"/>
+  <text x="970" y="255" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">Iceberg Catalog</text>
+  <text x="970" y="275" fill="#94a3b8" font-size="10" text-anchor="middle">Apache Nessie / AWS Glue</text>
+
+  <!-- S3 -->
+  <rect x="650" y="300" width="180" height="80" rx="10" fill="#11241f" stroke="#2dd4bf" stroke-width="1.5"/>
+  <text x="740" y="335" fill="#e2e8f0" font-size="14" font-weight="600" text-anchor="middle">Object Store</text>
+  <text x="740" y="355" fill="#94a3b8" font-size="10" text-anchor="middle">MinIO / AWS S3</text>
+
+  <!-- Edges -->
+  <path d="M240,180 L290,180" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  
+  <path d="M380,220 L380,290" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="400" y="260" fill="#94a3b8" font-size="10">Tokio UnixListener</text>
+
+  <path d="M300,340 L250,340" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="275" y="330" fill="#94a3b8" font-size="10" text-anchor="middle">RocksDB API</text>
+
+  <path d="M640,180 L560,180" fill="none" stroke="#f472b6" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrow)"/>
+  <text x="600" y="170" fill="#f472b6" font-size="10" text-anchor="middle">Auto-inject</text>
+
+  <path d="M460,340 L640,340" fill="none" stroke="#2dd4bf" stroke-width="2" marker-end="url(#arrowTeal)"/>
+  <text x="550" y="330" fill="#5eead4" font-size="10" text-anchor="middle">S3 Upload API</text>
+
+  <path d="M460,360 L870,260" fill="none" stroke="#2dd4bf" stroke-width="2" marker-end="url(#arrowTeal)"/>
+  <text x="665" y="300" fill="#5eead4" font-size="10" text-anchor="middle">Catalog API</text>
+</svg>
