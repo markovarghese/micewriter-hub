@@ -109,6 +109,8 @@ Expected: log line `uds_server: listening on /var/run/app/iceberg.sock`.
 
 The sandbox application itself drives load through its in-process SDK call path — no external client (k6, jmeter, hey) needed. This removes the HTTP-server hop that an external generator would add, which matters because the SDK's `send()` is serialized through a single Netty event loop lock and concurrent HTTP clients would just queue behind it without buying any parallelism.
 
+> **Design Note on Pacing:** The generator paces requests using fixed delays rather than fixed rates (`scheduleWithFixedDelay`). If the SDK or engine applies momentary backpressure (e.g. UDS write queue is full), the generator will gracefully slow down to match the engine's throughput. This prevents "retry storms" where the generator instantly fires thousands of delayed requests to try and catch up on missed ticks.
+
 The endpoints are:
 
 | Method | Path | Purpose |

@@ -24,7 +24,9 @@ The Sidecar Engine is injected automatically into business application pods. Its
    * **Streaming Parquet:** Instead of buffering full files in memory, the engine streams data directly into MinIO/S3 using `opendal` multipart uploads and 16MiB Parquet row groups, bounding memory tightly.
    * **Append-Only Reality:** The engine performs fast, append-only operations (via Iceberg's `FastAppendAction`). Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs outside of this sidecar.
    * **End-to-End Testing:** The engine can be configured to accept manual flush requests via the IPC socket by setting `ENABLE_MANUAL_FLUSH=true` (injected globally by the Kubernetes Webhook to ensure production environments remain protected from API abuse).
-3. **Signal Trapping:** It hooks into OS signals to catch Kubernetes `SIGTERM` events, safely draining in-flight UDS connections and forcing an emergency final flush of all local cache to S3 before allowing the pod to die.
+3. **Size-Threshold Flushes:** Alongside the timer, the engine also tracks the physical byte size of the active RocksDB column family. When this size exceeds the configured `FLUSH_SIZE_BYTES` threshold (with random jitter), an IPC flush signal is generated internally. 
+   * **Note on IPC Payload Bloat:** Because the UDS server converts each JSON record into an Arrow IPC stream before writing it to RocksDB, every record receives a full schema header. This significantly bloats the on-disk size compared to raw JSON (e.g., a 1 KB JSON payload may expand to ~4-8 KB). Consequently, the size threshold may be hit much faster than expected based strictly on the raw ingest rate.
+4. **Signal Trapping:** It hooks into OS signals to catch Kubernetes `SIGTERM` events, safely draining in-flight UDS connections and forcing an emergency final flush of all local cache to S3 before allowing the pod to die.
 
 ## 🚨 Troubleshooting & Known Issues
 
