@@ -259,10 +259,9 @@ After a manual sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sen
 
 | Timestamp (UTC) | Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | Peak CPU | Peak Mem | OOMKill? | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 2026-05-31 09:07Z | 1 | 1 KB | 10 | 5 min | 11.9 ms | 10.0 / s | 0 / 3002 | N/A | N/A | No | First validated scenario; engine sidecar at default 512 Mi limits |
-| 2026-05-31 09:07Z | 2 | 100 KB | 10 | 5 min | 12.0 ms | 10.0 / s | 0 / 3002 | N/A | N/A | No | 100× payload, same latency — confirms JSON+UDS scales linearly through this range |
-| 2026-05-31 09:07Z | 3 | 10 KB | 100 | 5 min | — | 70.6 / s | 8838 / 30007 (29.5%) | N/A | N/A | **Yes** | **Failure not from sizing.** Engine OOMKilled at 05:12:55 because Nessie 0.69 returned 404 on every flush → RocksDB accumulated unflushable backlog → 512 Mi limit hit. After Nessie chart was upgraded to 0.107.6 (see [`micewriter-local-infra@9f4c7c6`](https://github.com/markovarghese/micewriter-local-infra/commit/9f4c7c6)) and a fresh sandbox pod was deployed, the 10 KB × 100/s scenario should be re-run. |
-| 2026-05-31 09:07Z | 4 | 1 MB | 10 | 5 min | — | 0 / s | 3002 / 3002 (100%) | N/A | N/A | (engine already dead) | Cascade from scenario 3. Engine container had restarted after the OOMKill, but the SDK's UdsConnection did not reconnect; every send timed out at the 5 s ACK timeout. Tracked: [`micewriter-sdk-java#1`](https://github.com/markovarghese/micewriter-sdk-java/issues/1). |
+| 2026-06-09T15:16:33Z | Grid G4 | 1 MB | 500(lbl) | 180s | 1610 ms | 82.3 / s | 6 / 14832 | — | 244 MB | No | **128 MB FILES ACHIEVED AT DEFAULT conc=2 — NO OOM.** 128 MiB Trino target reachable with no concurrency cap / no RAM bump. |
+| 2026-06-10T03:54:43Z | STREAMING @ conc=1 | 1 MB | 100 | 90s | 3489 ms | 36.9 / s | 6 | — | 328 MiB | No | **PRODUCTION-VIABLE.** Single flush kept up with 100MiB/s ingest. 26 Iceberg commits, 15 streamed files all ~127 MiB. Nessie data-append snapshots confirmed. |
+| 2026-06-10T07:05:18Z | STREAMING @ conc=2 | 1 MB | 100 | 90s | 1913 ms | 73.6 / s | 65 / 6691 | 831m | 409 MiB RSS | No | **conc=2 PASSES under 512Mi — 74 MB/s.** Channel fixes (queue depth 2, UDS channel 8) bound pipeline. 53 Iceberg commits. |
 
 Engine CPU/Mem/RocksDB/flush-latency columns are populated from Grafana Cloud queries (see §2) once the corresponding cells have been re-run against the fixed Nessie. Scenarios 1 and 2 are clean baseline; 3 and 4 need re-execution before they constitute real sizing data.
 

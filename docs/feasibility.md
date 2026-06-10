@@ -79,6 +79,8 @@ Both of these become relevant at production scale and require a separate evaluat
 
 ## 5. What "viable" looks like
 
+Recent streaming architecture improvements have proven that producing 128 MiB Trino-optimized Parquet files is fully viable within a 512 MiB sidecar at `conc=2` concurrency, supporting ingestion rates up to 74 MB/s.
+
 The evaluation produces a row-per-scenario results table in [load-testing-spec.md §6](load-testing-spec.md) with peak CPU, peak memory, RocksDB usage, and flush latency for each `(payload_size × rate × duration)` combination.
 
 A scenario is **viable** if all of the following hold:

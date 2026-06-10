@@ -21,11 +21,11 @@ To efficiently persist incoming IPC records, the UDS server opportunistically ba
 * **`MAX_PAYLOAD_SIZE`**: **16 MB** total payload bytes.
 This maximizes RocksDB throughput while preventing OOM crashes on bursts of large payloads.
 
-### Engine Compilation Limits
-During the flush cycle, the Engine reads the raw JSON bytes from a frozen RocksDB column family and compiles them into Arrow/Parquet. To prevent out-of-memory (OOM) crashes on massive tables, it buffers data into chunks before writing to the `ArrowWriter`:
-* **`flush_compile_batch_size`**: Default **1,000 records**.
-* **`flush_compile_batch_bytes`**: Dynamically scaled to **~1% of the pod memory limit per CPU core** (e.g., ~1.28 MB per thread on a 512MiB, 4-thread pod).
-Whichever limit is hit first forces the Engine to flush the current Arrow batch to Parquet and clear its memory buffers.
+### Intake and Pipeline Queue Limits
+To prevent out-of-memory (OOM) crashes from excessive read-ahead buffering:
+* **UDS Ingest Channel**: Capped at depth **8**. With large ~2.4MB JSON frames, this strictly bounds the intake memory.
+* **Pipeline Queue Depth**: The flush pipeline channels are double-buffered (depth **2**) to prevent memory exhaustion when reading from RocksDB faster than S3 can upload.
+* **Parquet Row Groups**: Instead of accumulating full files in memory, the streaming engine rolls Parquet row groups at **16MiB** (`max_row_group_rows=15`), allowing garbage collection of Arrow arrays while the multipart upload streams.
 
 ### Flush Intervals
 Data is normally flushed based on a jittered cron loop to prevent all microservices from hitting the S3/Nessie catalog simultaneously.
@@ -36,16 +36,16 @@ Data is normally flushed based on a jittered cron loop to prevent all microservi
 ## 2. RocksDB Rotation & Backpressure Limits
 
 The Engine buffers incoming IPC messages in a durable local RocksDB "active" Column Family. To prevent this buffer from growing indefinitely between periodic flushes, the engine defines a size limit:
-* **`flush_size_bytes`**: Default **32 MB**.
+* **`flush_size_bytes`**: Default **128 MB**.
 * **`flush_size_jitter_bytes`**: Default **8 MB**.
 
-When the active CF size exceeds a randomized threshold between **24 MB** and **40 MB** (jitter), the engine rotates the CF (freezing it) and immediately triggers an asynchronous flush. 
+When the active CF size exceeds a randomized threshold between **120 MB** and **136 MB** (jitter), the engine rotates the CF (freezing it) and immediately triggers an asynchronous flush. 
 
 To protect the Engine's memory without unnecessarily throttling the host application, the engine enforces two global backpressure limits:
-* **Retained CF Count**: Reject traffic if the number of frozen CFs pending flush reaches `MAX_RETAINED_FROZEN_CFS` (default 8).
-* **Total Unflushed Bytes**: Reject traffic if the exact byte size of all uncompiled records (active + frozen) exceeds `config.flush_size_bytes * (1 + MAX_RETAINED_FROZEN_CFS)` (e.g., 288 MB).
+* **Retained CF Count**: Reject traffic if the number of frozen CFs pending flush reaches `MAX_RETAINED_FROZEN_CFS` (default 2).
+* **Total Unflushed Bytes**: Reject traffic if the exact byte size of all uncompiled records (active + frozen) exceeds `config.flush_size_bytes * (1 + MAX_RETAINED_FROZEN_CFS)` (e.g., 384 MB).
 
-Because the Retained CF Count triggers the moment the 8th CF is frozen, the active CF is entirely blocked from accepting new data. Therefore, the system effectively hits backpressure at exactly the size of 8 frozen CFs (expected **~256 MB**), making the 288 MB limit a fallback shadow limit.
+Because the Retained CF Count triggers the moment the 2nd CF is frozen, the active CF is entirely blocked from accepting new data. Therefore, the system effectively hits backpressure at exactly the size of 2 frozen CFs (expected **~256 MB**), making the 384 MB limit a fallback shadow limit.
 
 ---
 
@@ -91,13 +91,13 @@ sequenceDiagram
 * **Throughput**: 100 MB / sec.
 * **Payload Limit**: 1 MB is under the 16 MB limit.
 * **The Reality (Dynamic Hardware-Aware Pipelining)**:
-  At 100 MB/sec, the active CF hits its 32 MB limit and rotates every ~0.3 seconds. The background `flush_engine` uses a 4-stage pipelined architecture to parse the data and concurrently upload multiple Parquet chunks to MinIO via a `JoinSet`. The engine automatically scales its thread pool to saturate available CPU cores, dynamically sizing memory limits to prevent overflow. Even on highly-constrained pods, the pipeline reaches ~60-65 MB/s.
+  At 100 MB/sec, the active CF hits its 128 MB limit and rotates every ~1.3 seconds. The background `flush_engine` uses a double-buffered pipelined architecture (queue depth=2) to stream the Arrow IPC data into Iceberg Parquet files. At `conc=2` under a 512Mi pod limit, the pipeline sustains ~74 MB/s.
 * **Healthy Backpressure in Action**:
-  1. Because the host application generates data faster (100 MB/s) than the engine can process it (~62 MB/s), the engine begins accumulating frozen CFs.
-  2. Within ~6.7 seconds, the `MAX_RETAINED_FROZEN_CFS` limit of 8 (and the 288 MB shadow limit) is hit.
+  1. Because the host application generates data faster (100 MB/s) than the engine can process it (~74 MB/s), the engine begins accumulating frozen CFs.
+  2. Within ~6.7 seconds, the `MAX_RETAINED_FROZEN_CFS` limit of 2 (and the 384 MB shadow limit) is hit.
   3. The engine begins rejecting IPC requests with a "backpressure" error. With `send()` the SDK surfaces this as a `RuntimeException` (the caller decides to drop); with `sendAsync()` the client-side in-flight window (§1) has usually already throttled the producer before the engine even has to reject.
-  4. The host application continues to run without experiencing OOM crashes or thread-pool exhaustion!
-* **Result**: The engine smoothly sustains ~62 MB/s of ingestion without dropping the pod, gracefully shedding the excess 38 MB/s load via backpressure.
+  4. The host application continues to run without experiencing OOM crashes or thread-pool exhaustion! The engine's memory safely rides under 512Mi (peak ~416Mi working set).
+* **Result**: The engine smoothly sustains ~74 MB/s of ingestion without dropping the pod, gracefully shedding the excess load via backpressure.
 
 ```mermaid
 sequenceDiagram

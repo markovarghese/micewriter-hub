@@ -31,15 +31,15 @@ sequenceDiagram
     App->>SDK: icebergTemplate.send(pojo)
     SDK->>SDK: Serialize POJO to JSON
     SDK->>UDS: Write JSON payload (length-prefixed)
-    UDS->>Engine: Read payload bytes
-    Engine->>RocksDB: Async zero-copy append to active Column Family
+    UDS->>Engine: Read JSON, parse to Arrow IPC
+    Engine->>RocksDB: Append Arrow IPC to active Column Family
     Engine-->>SDK: Acknowledge IPC response
 
-    Note over Engine,ObjectStore: Hybrid Flush Cycle (10 Min or 32 MB)
+    Note over Engine,ObjectStore: Hybrid Flush Cycle (10 Min or 128 MB)
     Engine->>Engine: Jitter timer fires OR size limit reached, rotate RocksDB Column Family
-    Engine->>RocksDB: Read frozen Column Family records
-    Engine->>Engine: Parse JSON → Arrow → Parquet
-    Engine->>ObjectStore: Upload Parquet files (S3 API)
+    Engine->>RocksDB: Read frozen Arrow IPC records
+    Engine->>Engine: Stream Arrow IPC → Parquet chunks
+    Engine->>ObjectStore: Multipart upload Parquet to S3
     Engine->>Catalog: Atomic commit append to Iceberg Table
     Engine->>RocksDB: Purge frozen Column Family
 ```
@@ -55,16 +55,16 @@ All IPC messages use a standard 4-byte big-endian length prefix framing protocol
 
 ### 2.2 Serialization
 - **Schemas:** Handshake messages (`REGISTER_SCHEMA`) are sent as JSON.
-- **Telemetry Records:** Hot-path ingestion records (`INGEST_RECORD`) are streamed as native **JSON** bytes. This format ensures simple debugging while remaining completely stateless in the Java SDK.
-- **The Engine Pipeline:** The background flush cycle reads the raw JSON bytes from RocksDB. Thanks to dynamic hardware-aware scaling, the engine pushes these raw JSON chunks into a concurrent pool of parser threads (scaled to match the available CPU cores of the pod). These threads leverage the highly optimized `arrow-json` crate to compile the JSON directly into strictly memory-bounded Arrow `RecordBatch` arrays, avoiding any dynamic AST overhead.
-- **Payload Limits:** The payload size is hard-capped at **16 MB** by both the SDK and the engine to prevent OOM attacks. A 16 MB monolithic array of floats can easily expand into a 200+ MB `serde_json::Value` DOM tree in Rust, which would threaten the sidecar's rigid 512 MiB memory boundary.
+- **Telemetry Records:** Hot-path ingestion records (`INGEST_RECORD`) are sent as native **JSON** bytes from the SDK.
+- **Intake Conversion & Schema Caching:** To prevent disk bottlenecks and memory bloat, the UDS intake path uses a shared pool of `arrow-json` parsers to instantly convert JSON payloads into compact Arrow IPC format *before* writing to RocksDB. The intake writer maintains a per-table Arrow schema cache to avoid rebuilding schemas per-record.
+- **Streaming Parquet Engine:** The background flush cycle reads compact Arrow IPC bytes from RocksDB. Because parsing is already done, it simply streams the IPC records directly into an `AsyncArrowWriter` using `opendal` multipart uploads, bounding memory strictly to the Parquet row group size (~16MiB) instead of buffering full files in memory.
 
 ## 3. The Flush Cycle & Graceful Shutdown
 
 To consolidate small records into optimized Iceberg v3 Parquet files while protecting the Catalog API from rate limits (the "Thundering Herd" problem):
 
-- **Hybrid Time/Size Column Family Swap:** The sidecar rotates the active RocksDB Column Family and freezes it for compilation either on a jittered schedule (e.g., 10 minutes ± 2 minutes) OR immediately if the uncompressed data exceeds 32 MB. The 32 MB flush limit ensures the final compiled Parquet bytes held in memory never exceed ~15 MB, safeguarding the 512 MiB container limit.
-- **Compilation:** The frozen JSON records are dynamically cast using the Iceberg schema via `arrow-json`, and compiled into Parquet file batches. Note: The engine performs fast, append-only operations; Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs.
+- **Hybrid Time/Size Column Family Swap:** The sidecar rotates the active RocksDB Column Family and freezes it for compilation either on a jittered schedule (e.g., 10 minutes ± 2 minutes) OR immediately if the uncompressed data exceeds 128 MB. The 128 MB flush limit optimizes for downstream analytics while keeping the sidecar under the 512 MiB container limit.
+- **Compilation:** The frozen Arrow IPC records are dynamically cast using the Iceberg schema and streamed into Parquet files. Note: The engine performs fast, append-only operations; Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs.
 - **Catalog Commit:** The sidecar uploads files to S3 (MinIO or AWS S3) and executes an atomic commit to the configured catalog (Nessie or AWS Glue). On `CommitFailedException` (optimistic locking failure), it uses an exponential backoff retry.
 - **SIGTERM Emergency Flush:** If Kubernetes initiates pod termination, the sidecar intercepts the `SIGTERM` signal, pauses new ingestion, forces an immediate compilation/commit of remaining RocksDB data, and exits safely.
 - **Manual Flush (Testing Only):** In non-production environments, the injector configures `ENABLE_MANUAL_FLUSH=true`, exposing an IPC command to manually force a flush. This enables end-to-end integration tests while remaining disabled in production to protect the Catalog from API abuse.

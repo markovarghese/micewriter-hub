@@ -66,6 +66,12 @@ Every message over the UDS has this layout:
 | `FLUSH_NOW`       | `0x03` | `[Empty Payload]` |
 | ACK (engine → SDK) | — | JSON `{ status: "ok"\|"error", msg? }` |
 
+## 🚨 Troubleshooting & Known Issues
+
+### 1. Startup Race Condition
+**Issue:** The SDK connects before the Engine socket exists, leading to dropped connections or timeouts on startup.
+**Workaround:** Document the race as a known issue for now. Currently, applications should implement connection retries or use an init container to wait for the `/var/run/app/iceberg.sock` file to be created before starting the JVM. This will be addressed structurally in a future release.
+
 ## 🏗️ Spring Boot Usage
 
 Add the starter dependency — it auto-configures everything via `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`. We recommend importing the BOM in your `<dependencyManagement>` so you don't have to specify version tags.

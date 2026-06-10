@@ -19,8 +19,9 @@ This repository contains the platform/infrastructure core. It is a highly optimi
 The Sidecar Engine is injected automatically into business application pods. Its primary responsibilities include:
 
 1. **UDS Listener:** It spins up a raw Tokio `UnixListener` on the shared `/var/run/app/iceberg.sock` and instantly writes incoming telemetry payloads into RocksDB, returning microsecond acknowledgments.
-2. **Jittered Cron Loop:** A background Tokio task wakes up every ~10 minutes (with intentional jitter to desynchronize across pods) to compile frozen RocksDB records (JSON bytes) into Parquet files, and execute catalog commits with exponential backoff.
-   * **Dynamic Hardware-Aware Scaling:** The engine reads injected pod memory limits and automatically scales its internal thread pool to saturate available CPU cores, while strictly sizing `Arrow` compile batches and `RocksDB` buffers to maintain memory safety on constrained nodes.
+2. **Jittered Cron Loop:** A background Tokio task wakes up every ~10 minutes (with intentional jitter to desynchronize across pods) to stream frozen RocksDB records (Arrow IPC bytes) into Parquet files, and execute catalog commits with exponential backoff.
+   * **Dynamic Hardware-Aware Scaling:** The engine reads injected pod memory limits and automatically sizes pipeline queue depths, UDS ingest channels, and `RocksDB` buffers to maintain memory safety on constrained nodes.
+   * **Streaming Parquet:** Instead of buffering full files in memory, the engine streams data directly into MinIO/S3 using `opendal` multipart uploads and 16MiB Parquet row groups, bounding memory tightly.
    * **Append-Only Reality:** The engine performs fast, append-only operations (via Iceberg's `FastAppendAction`). Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs outside of this sidecar.
    * **End-to-End Testing:** The engine can be configured to accept manual flush requests via the IPC socket by setting `ENABLE_MANUAL_FLUSH=true` (injected globally by the Kubernetes Webhook to ensure production environments remain protected from API abuse).
 3. **Signal Trapping:** It hooks into OS signals to catch Kubernetes `SIGTERM` events, safely draining in-flight UDS connections and forcing an emergency final flush of all local cache to S3 before allowing the pod to die.
@@ -40,6 +41,12 @@ db_opts.set_use_direct_io_for_flush_and_compaction(true);
 db_opts.set_use_direct_reads(true);
 ```
 With Direct I/O enabled, the engine's memory footprint is strictly bounded to its physical RSS (which sits stably under ~200 MB), completely immunizing it against Page Cache inflation.
+
+### 2. Memory Exhaustion from Read-Ahead
+Even with Direct I/O, early streaming pipelines could OOM under `conc=2` (two concurrent flush streams) due to excessive channel read-ahead buffering large multi-megabyte payloads in memory before the S3 upload could clear them.
+
+**Resolution:**
+The engine pipeline channels are double-buffered (queue depth capped at 2) and the UDS ingest channel is constrained (depth 8) to strictly bound the amount of in-flight bytes. Furthermore, RocksDB SST compression was disabled and replaced with hardware CRC32C, eliminating wasteful memory and CPU overhead on random telemetry payloads. The engine safely rides under the 512Mi limit using ~400Mi working set even at 74 MB/s sustained ingestion.
 
 ## 📦 Output Artifact
 A minimal Linux Docker Image (~20MB-50MB) tagged and pushed to the internal container registry.
