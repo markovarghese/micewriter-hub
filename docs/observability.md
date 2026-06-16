@@ -44,9 +44,8 @@ The dashboard includes the following 8 critical visualizations:
 ## Setting Up Grafana Cloud
 
 To deploy the dashboard:
-1. Copy the `grafana-dashboard.json` file from the `k8s` directory in `micewriter-sandbox`.
-2. Import it into your Grafana Cloud instance.
-3. Ensure your local Kubernetes cluster has Grafana Alloy (or another Prometheus agent) configured to scrape pod metrics and Remote Write them to your Grafana Cloud endpoint.
+1. Import the `grafana-dashboard.json` file (located in the `dashboards` directory next to this file) into your Grafana Cloud instance.
+2. Ensure your local Kubernetes cluster has Grafana Alloy (or another Prometheus agent) configured to scrape pod metrics and Remote Write them to your Grafana Cloud endpoint.
 
 ## Connecting an AI Agent (Grafana MCP)
 
