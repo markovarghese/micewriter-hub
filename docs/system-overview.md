@@ -51,10 +51,10 @@ See [per-table-pipelines.md](per-table-pipelines.md) for the full v2 design, inc
 
 ## 2. gRPC Transport & Routing
 
-Communication between `micewriter-sdk-java` and the per-table pipelines runs over **gRPC over HTTP/2**. The wire payload keeps the v1 CBOR shape; only the transport changes.
+Communication between `micewriter-sdk-java` and the per-table pipelines runs over **gRPC over HTTP/2**. The record payload is **CBOR** — the original pre-split (v1.0.0) wire shape, carried unchanged into v2; only the transport changed from UDS to gRPC. (Note: the v1 release line has since moved its own wire to JSON — see [v1-to-v2-migration.md](v1-to-v2-migration.md) — so v2's CBOR shape is no longer "the current v1 shape"; v2 kept CBOR while v1 diverged.)
 
 ### 2.1 Framing
-gRPC handles framing. The application-layer payload retains the v1 per-record shape: `[u16 table_name_len][table_name UTF-8][CBOR bytes]`. The engine validates that incoming records match the table it was pinned to at startup and rejects cross-table writes.
+gRPC handles framing. The application-layer payload retains the original per-record shape — table name plus a CBOR record body, stored internally as `[u16 table_name_len][table_name UTF-8][CBOR bytes]`. The engine validates that incoming records match the table it was pinned to at startup and rejects cross-table writes.
 
 ### 2.2 RPCs
 

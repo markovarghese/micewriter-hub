@@ -266,6 +266,9 @@ After a manual sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sen
 
 Engine CPU/Mem/RocksDB/flush-latency columns are populated from Grafana Cloud queries (see §2) once the corresponding cells have been re-run against the fixed Nessie. Scenarios 1 and 2 are clean baseline; 3 and 4 need re-execution before they constitute real sizing data.
 
+> [!NOTE]
+> The 2026-05-31 rows above are a historical record of that run and are left unedited. They predate two v1-line changes: the wire format has since moved from CBOR to **JSON**, and the `UdsConnection` reconnect gap (`micewriter-sdk-java#1`, the cause of the scenario-4 cascade) has since been **fixed** (lazy reconnect + automatic schema re-registration). Re-runs should be interpreted against current v1 behavior.
+
 **Peak CPU** = `max_over_time(rate(container_cpu_usage_seconds_total{container="micewriter-engine"}[1m])[15m:])`.  
 **Peak Mem** = `max_over_time(container_memory_working_set_bytes{container="micewriter-engine"}[15m:])`.  
 **Flush latency** = wall-clock between `rotating column family` and `Table flushed` in the engine logs (Loki query in §2).
@@ -307,7 +310,7 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 |---|---|---|
 | Sandbox `TelemetryEvent.payload` is a `String` | 10 MB string payloads are valid Java but test a different serialization path than real binary tensor payloads | Acceptable for initial sizing; revisit when binary payloads are introduced |
 | Single-replica only | Catalog contention from concurrent commits across many engine sidecars is not exercised | Phase-2 follow-up: scale the sandbox Deployment to 2–3 replicas (lifting the k8s-node-3 nodeSelector) and re-run one or two cells. See [feasibility.md §4](feasibility.md) for what the local setup does and does not measure. |
-| Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, CBOR decode latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and inject the corresponding scrape annotations via the k8s-injector webhook. |
+| Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, JSON-to-Arrow parse latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and inject the corresponding scrape annotations via the k8s-injector webhook. |
 
 ---
 

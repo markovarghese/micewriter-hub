@@ -91,7 +91,7 @@ sequenceDiagram
 
 ## 3. Wire protocol
 
-The wire format keeps the v1 CBOR payload shape; **transport changes from UDS to gRPC over HTTP/2**. The existing per-record `[u16 table_name_len][table_name UTF-8][CBOR bytes]` framing is unchanged — the engine still validates that incoming records match the table it was pinned to at startup, rejecting cross-table writes.
+The wire format keeps the original pre-split (v1.0.0) **CBOR** payload shape; **transport changes from UDS to gRPC over HTTP/2**. The per-record `[u16 table_name_len][table_name UTF-8][CBOR bytes]` record shape is unchanged — the engine still validates that incoming records match the table it was pinned to at startup, rejecting cross-table writes. (The v1 line has since moved its own wire to JSON; v2 kept CBOR — see [v1-to-v2-migration.md](v1-to-v2-migration.md).)
 
 | RPC | Direction | Payload | Notes |
 |---|---|---|---|
@@ -99,7 +99,7 @@ The wire format keeps the v1 CBOR payload shape; **transport changes from UDS to
 | `Ingest` | SDK → Pipeline | Streaming CBOR records | Bidi streaming over a long-lived channel. ACK per record. |
 | `FlushNow` | SDK → Pipeline | Empty | Unary; only honored when `ENABLE_MANUAL_FLUSH=true`. Test environments only. |
 
-The 16 MB per-payload cap and the CBOR-DOM amplification reasoning from v1 still apply — see [system-overview.md §2](system-overview.md).
+The 16 MB per-payload cap and the CBOR-DOM amplification reasoning apply to v2's CBOR pipeline — see [system-overview.md §2](system-overview.md). (This reasoning is specific to v2: current v1 parses JSON directly via `arrow-json` and no longer goes through a `serde_json::Value` DOM.)
 
 ## 4. SDK table-to-endpoint routing
 
@@ -117,7 +117,7 @@ micewriter:
     cross-ns-events:  "engine-events.shared-data.svc:9090"
 ```
 
-`ManagedChannel` instances are lazy-created per resolved endpoint and cached for the lifetime of the SDK. gRPC's native keepalive and reconnect handle transport blips — there is no equivalent of the v1 `UdsConnection` reconnect bug.
+`ManagedChannel` instances are lazy-created per resolved endpoint and cached for the lifetime of the SDK. gRPC's native keepalive and reconnect handle transport blips natively, with no app-side awareness. (The early v1 `UdsConnection` had no reconnect — `micewriter-sdk-java#1` — but the v1 line has since added lazy reconnect plus automatic schema re-registration, so that gap is closed in both lines.)
 
 ## 5. Lifecycle & failure modes
 
@@ -205,10 +205,12 @@ For a Spring Boot or Dropwizard app to start writing to a new Iceberg table:
 
 There is no Kubernetes annotation, no sidecar to inject, no per-pod PVC to provision. The v1 `micewriter-k8s-injector` admission webhook is sunset in v2.
 
-## 11. What does not change from v1
+## 11. What carries over from the v1.0.0 baseline
+
+These were carried unchanged from the original split point into v2. (The current **v1 line has since diverged** on some of them — notably JSON-on-the-wire and a 128 MB / ~5 min flush window — so these describe v2's behavior, not necessarily today's v1. See [v1-to-v2-migration.md](v1-to-v2-migration.md).)
 
 - The append-only contract — Puffin deletion vectors and merge-on-read are still out of scope; deferred to async Iceberg maintenance jobs
-- The 16 MB per-payload cap, driven by CBOR → `serde_json::Value` DOM amplification during the `arrow-json` parse step
+- The 16 MB per-payload cap, driven in v2 by CBOR → `serde_json::Value` DOM amplification during the `arrow-json` parse step
 - The hybrid time/size flush (jittered 10 min ± 2 min OR 32 MB) within each pipeline pod
 - SIGTERM emergency flush on pod termination
 - `ENABLE_MANUAL_FLUSH=true` IPC command for non-production integration tests

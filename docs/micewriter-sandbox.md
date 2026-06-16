@@ -20,7 +20,7 @@ Serves as "documentation-by-code" for product teams wanting to adopt the mIceWri
 3. **K8s Integration:** Contains a deployment manifest demonstrating the critical `iceberg-stream.micewriter.io/inject: "true"` pod annotation required to trigger the Mutating Webhook.
 
 ## 🏃 Workflow
-Developers can run this app locally, hit its mock endpoints with an HTTP load generator, and then open the local MinIO UI to watch the telemetry successfully materialize as Parquet files every 10 minutes.
+Developers can run this app locally, hit its mock endpoints with an HTTP load generator, and then open the local MinIO UI to watch the telemetry successfully materialize as Parquet files every ~5 minutes.
 
 ---
 ### 🔗 The mIceWriter Ecosystem

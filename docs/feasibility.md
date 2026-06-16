@@ -24,9 +24,9 @@ Before recommending the mIceWriter sidecar to other teams deploying to EKS, one 
 
 Engine resource cost is a function of `(payload_size × event_rate × buffer_window_duration)`. That function is **the same** whether the sidecar runs on EKS or on a k3s VM, because the CPU and memory budget inside the sidecar container is driven by:
 
-- CBOR decode of incoming records
+- JSON-to-Arrow parsing of incoming records (via `arrow-json`, at ingest)
 - RocksDB writes during the buffer window
-- Parquet compilation at flush time
+- Streaming Parquet compilation at flush time
 - Catalog client serialization
 
 None of these depend on whether the catalog is Nessie or Glue, or whether the object store is MinIO or S3. The cloud APIs differ in **latency**, which affects flush wall-clock time, but they do not change the engine's CPU or memory footprint during steady-state ingestion.

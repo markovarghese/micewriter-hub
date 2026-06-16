@@ -7,38 +7,55 @@
 
 This document captures **why** the mIceWriter architecture pivoted from v1 (per-pod sidecar) to v2 (per-table pipelines). It exists so future readers understand the design constraints that drove the move — not as user-facing migration instructions (there is no installed base of v1 to migrate).
 
+It is written as historical rationale. Since the split, the **v1 line has been independently and significantly improved** (both lines are maintained — see the closing section). Two of the three original drivers for v2 have since been addressed *within v1 itself*; this doc has been updated to say so plainly, so it reflects today's v1 rather than the v1 of the split point.
+
 ## TL;DR
 
-v1 worked but had three properties that compounded as adoption grew:
-1. **Engine RAM was bound to the 512 MiB sidecar envelope**, capping the size of compiled Parquet files
-2. **Catalog commit pressure scaled linearly with adopter pod count** — every app pod was a committing pod
-3. **Engine lifecycle was bound to app pod lifecycle** — bug fixes, upgrades, and resource changes required recycling app pods
+v2 was originally pursued for three properties of v1 that compounded as adoption grew. The v1 line has since closed two of them on its own, leaving **two enduring reasons** v2 exists:
 
-v2 addresses all three by deploying engines as **one `Deployment` + `Service` per Iceberg table**, with the SDK routing via the existing `@IcebergEntity(table = "...")` annotation over gRPC.
+1. **Catalog commit pressure scales with adopter pod count** — every app pod is a committing pod, and this is structural to the per-pod sidecar shape. *(Still true in v1.)*
+2. **Engine lifecycle is bound to app pod lifecycle** — the engine can't be rolled, resized, or scaled independently of the app pods it rides in. *(Still true in v1; the narrower "no reconnect" fault-recovery gap has since been fixed in v1.)*
 
-## Driver 1: Parquet file size is gated by engine RAM
+The original third driver — **Parquet file size gated by the 512 MiB sidecar RAM envelope** — no longer holds: the v1 line moved to a streaming upload path that decouples file size from engine RAM (see [What the v1 line has since solved](#what-the-v1-line-has-since-solved)).
 
-The v1 sidecar compiles each flush window's records in memory via `CBOR → NDJSON → Arrow → Parquet`. The JSON DOM hop amplifies payload size (a 16 MB CBOR payload of floats expands to 200+ MB of `serde_json::Value`), and the whole batch must live in memory until the Parquet write completes. The 32 MB CF flush ceiling and 16 MB per-payload cap are both reverse-engineered from the 512 MiB sidecar limit ([system-overview.md §2](system-overview.md)).
+v2 addresses the two enduring drivers by deploying engines as **one `Deployment` + `Service` per Iceberg table**, with the SDK routing via the existing `@IcebergEntity(table = "...")` annotation over gRPC.
 
-Downstream analytics engines (Trino, Athena, Spark) want larger Parquet files. The structural answer is more RAM per engine — which the sidecar pattern cannot give without raising the limit for every adopting pod regardless of payload mix.
+## Enduring driver 1: Catalog commit pressure scales with adopter pod count
 
-In v2 each pipeline is sized for the table's payload shape: small audit-event tables get small pods; large model-evaluation tables get a 4 GiB envelope.
-
-## Driver 2: Catalog commit pressure scales with adopter pod count
-
-v1's component map noted, but did not measure: "Catalog commit pressure grows with N" — where N is the count of app pods writing to the same Iceberg table. With 100 app replicas, 100 sidecars produce 100 flush commits per window against the same table. `FastAppendAction`'s optimistic-locking retry absorbs small N but the retry cost is super-linear.
+Each v1 sidecar commits to the Iceberg catalog independently. With N app replicas writing to the same table, N sidecars produce N flush commits per window against that table (the v1 engine builds its own catalog handle and runs an atomic `FastAppendAction` per flush cycle — `iceberg_writer.rs`). `FastAppendAction`'s optimistic-locking retry absorbs small N, but the retry cost is super-linear as N grows. This is intrinsic to the per-pod shape and is **unchanged in current v1** — no cross-pod batching or shared committer was added.
 
 v2 bounds commit count per table to the pipeline's pod count, which is set by HPA from write metrics rather than coupled to the app's replica count. A pipeline with 3 pods produces 3 commits per window regardless of how many apps are writing to it.
 
-## Driver 3: Engine lifecycle was bound to app pod lifecycle
+## Enduring driver 2: Engine lifecycle is bound to app pod lifecycle
 
-In v1, every engine bug fix required recycling every adopting app pod. The SDK had no UDS reconnect (`micewriter-sdk-java#1`), so engine container restarts left the app pod in a `2/2 Ready` but broken state — the only recovery was deleting the whole pod.
+In v1, the engine runs as a sidecar inside each app pod, so its lifecycle is the app pod's lifecycle. An engine bug fix, a memory bump, or a horizontal scale of write capacity all require recycling or re-specifying the app pods. This coupling is **structural to the sidecar shape and remains in current v1**.
 
 v2 deploys engines as their own `Deployment` per table:
 - Engine bug fixes roll independently per pipeline
-- gRPC's native reconnect handles transport blips without app-side awareness — the v1 reconnect bug is moot
-- Vertical scaling is a DaemonSet/Deployment spec edit, not an app Pod spec edit
+- Vertical and horizontal scaling is a Deployment/HPA spec edit, not an app Pod spec edit
 - Per-table blast radius — a schema bug in one pipeline can't OOM engines serving other tables
+- gRPC's native keepalive/reconnect handles transport blips without app-side awareness
+
+Note this is the *structural* argument, not a fault-recovery one. The original Driver-3 framing leaned on a specific v1 bug — the SDK had no UDS reconnect (`micewriter-sdk-java#1`), so an engine container restart left the app pod `2/2 Ready` but wedged. **That gap has since been closed in v1**: the SDK now reconnects lazily on the next send (`UdsConnection.ensureConnected()`) and automatically re-registers schemas to the restarted engine (`SchemaRegistrar` reconnect listener). So reconnect is no longer a reason to prefer v2 — the enduring point is lifecycle decoupling.
+
+## What the v1 line has since solved
+
+Two of the original arguments for v2 have been overtaken by independent work on the v1 line. They are no longer differentiators:
+
+### Parquet file size is no longer gated by engine RAM (former Driver 1)
+
+The original argument was that the v1 sidecar compiled each flush window entirely in memory via `CBOR → NDJSON → Arrow → Parquet` — a JSON-DOM hop (a 16 MB CBOR float payload exploding to 200+ MB of `serde_json::Value`) with the whole batch resident until the Parquet write finished, so file size was capped by the 512 MiB envelope.
+
+Current v1 does none of that:
+- The wire format is **JSON**, parsed **directly** to Arrow IPC at ingest via `arrow-json` (`arrow_convert.rs`) — there is no CBOR and no `serde_json::Value` DOM. RocksDB stores Arrow IPC.
+- On flush, IPC records **stream** into Parquet via `iceberg-rust`'s `RollingFileWriter`/`ParquetWriter` over an `opendal` S3 multipart upload (`flush_engine.rs`). Memory is bounded to the **row group** (~8 MiB default), not the whole batch — so Parquet file size is decoupled from the RAM envelope. v1 produces Trino-friendly files (default 64 MiB target, tunable to 128 MiB) *within* the 512 MiB sidecar.
+- The active-CF flush rotation is **128 MB** (`flush_size_bytes`), not the old "32 MB ceiling." Upload or commit failures **retain** the frozen RocksDB column family for re-flush next cycle rather than losing data (`rocksdb_store.rs` retain-on-failure).
+
+v2 still offers *per-table* RAM sizing (small audit tables get small pods; large model-evaluation tables get a bigger envelope), but that is a sizing/isolation nuance — v1 is no longer RAM-gated on file size. The hard **16 MB per-payload cap** (a per-frame guard, `uds_server.rs`) and the **512 MiB default envelope** remain in both lines.
+
+### Throughput is no longer capped at the synchronous ceiling
+
+The early v1 SDK only had a blocking `send()`, which topped out around ~104 records/s waiting on per-record ACKs. The v1 SDK now offers a bounded-async path (`sendAsync` / `sendAsyncWithRetry`) with an 8 MiB byte-budget `Semaphore` for backpressure, and the synchronous `send()` is `@Deprecated`. This is not a v2-only property. *(Note: the current v2 SDK does not carry this async path — its `send()` is synchronous with a per-table lock.)*
 
 ## Why not other shapes considered
 

@@ -17,15 +17,17 @@ It is a **Maven multi-module project** that ships five artifacts from a single r
 | **dropwizard** | `micewriter-sdk-java-dropwizard` | Dropwizard applications |
 
 ## 🌿 Branches and Versioning
-The SDK maintains two active release lines depending on your infrastructure:
-- **`2.x.x` (main branch)**: Uses **gRPC over HTTP/2** for central per-table pipelines.
-- **`1.x.x` (v1 branch)**: Uses **Unix Domain Sockets (UDS)** for per-pod sidecars.
+The SDK maintains two active release lines depending on your infrastructure. They have **diverged** on both transport and serialization:
+- **`2.x.x` (main branch)**: **gRPC over HTTP/2** for central per-table pipelines; serializes records as **CBOR** (Jackson `CBORFactory`).
+- **`1.x.x` (v1 branch)**: **Unix Domain Sockets (UDS)** for per-pod sidecars; serializes records as **JSON** (Jackson `ObjectMapper`). The v1 line keeps JSON on the wire to stay lean on host CPU.
+
+The sections below describe the **v1 (UDS) SDK**; v2 differences are called out inline.
 
 ## 🛠️ Core Technology Stack
 - **Language:** Java 17
 - **Framework support:** Spring Boot AutoConfiguration **and** Dropwizard 4.x Bundle
-- **Serialization:** CBOR (Concise Binary Object Representation) via Jackson `CBORFactory`
-- **Network IO:** Netty Epoll (UDS communication — Linux only)
+- **Serialization:** JSON via Jackson `ObjectMapper` (v1). *(v2 uses CBOR via `CBORFactory`.)*
+- **Network IO:** Netty Epoll (UDS communication — Linux only). *(v2 uses gRPC over HTTP/2.)*
 
 ## ⚙️ Functionality
 
@@ -37,13 +39,14 @@ This library abstracts away the IPC complexity so business developers just write
    - *Spring Boot*: scans the classpath automatically via `SpringSchemaRegistrar` on `ContextRefreshedEvent`; bounded by `micewriter.base-package`.
    - *Dropwizard*: entity classes are declared explicitly via `MicewriterBundle.entities(...)` because Dropwizard provides no classpath scanner.
 
-3. **`IcebergStreamTemplate`:** Exposes a `.send(pojo)` method that serializes the object into **CBOR** bytes and sends it as an `INGEST_RECORD` (0x02) message over the Unix Domain Socket. Blocks until the engine ACKs the RocksDB write (typically microseconds). The template is:
+3. **`IcebergStreamTemplate`:** Serializes the object to **JSON** bytes and sends it as an `INGEST_RECORD` (0x02) message over the Unix Domain Socket. The preferred path is the **bounded-async** `sendAsyncWithRetry(pojo)`, which pipelines records (returning a `CompletableFuture`) with backpressure enforced by an 8 MiB in-flight byte-budget `Semaphore` and exponential-backoff retry — this lifts the ~104 records/s ceiling of the old synchronous path. The blocking `send(pojo)` (ACK per record, typically microseconds) is now **`@Deprecated`** in favor of `sendAsyncWithRetry`. The template is:
    - A Spring `@Bean` in Spring Boot apps (injected with `@Autowired`).
    - Retrieved via `MicewriterBundle.getTemplate()` in Dropwizard apps.
 
 4. **Lifecycle management:**
    - *Spring Boot*: `UdsConnection` is a bean managed by the Spring context; closed on context shutdown.
    - *Dropwizard*: connection open/close is handled by a `Managed` object registered by `MicewriterBundle`.
+   - **Reconnect:** if the engine container restarts and drops the socket, `UdsConnection` reconnects lazily on the next send (`ensureConnected()`), and `SchemaRegistrar` automatically re-registers all known schemas to the restarted engine — so a sidecar restart no longer wedges the app pod.
 
    > **Append-only:** The SDK is designed exclusively for high-throughput, append-only telemetry. Row-level updates or deletes are not supported.
 
@@ -58,7 +61,7 @@ Every message over the UDS has this layout:
 | Message | Type byte | Payload encoding |
 |---|---|---|
 | `REGISTER_SCHEMA` | `0x01` | JSON `{ table, namespace, fields }` |
-| `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][CBOR bytes]` |
+| `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][JSON bytes]` |
 | `FLUSH_NOW`       | `0x03` | `[Empty Payload]` |
 | ACK (engine → SDK) | — | JSON `{ status: "ok"\|"error", msg? }` |
 
@@ -100,7 +103,7 @@ public class EventService {
     @Autowired IcebergStreamTemplate icebergTemplate;
 
     public void record(TelemetryEvent event) {
-        icebergTemplate.send(event);
+        icebergTemplate.sendAsyncWithRetry(event);   // bounded-async; send() is deprecated
     }
 }
 ```
