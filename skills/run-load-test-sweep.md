@@ -78,7 +78,7 @@ For the v1 line the file is `../micewriter-sandbox-v1/load-tests/results/results
 
 ## 4. Full-matrix sweep
 
-The 13 non-skip cells of the test matrix (1/10/100/500 ev/s × 1 KB/100 KB/1 MB/10 MB), `durationSec` 900, `restSecondsBetween` 60. Total ≈ `(cells × durationSec) + ((cells-1) × rest)` ≈ 3.5 h.
+The 13 non-skip cells of the test matrix (1/10/100/500 ev/s × 1 KB/100 KB/1 MB/5 MB), `durationSec` 900, `restSecondsBetween` 60. Total ≈ `(cells × durationSec) + ((cells-1) × rest)` ≈ 3.5 h.
 
 Do **NOT** pass all cells to `/loadtest/sweep` in a single request — the sandbox pre-allocates templates for all cells concurrently, which will cause a `java.lang.OutOfMemoryError` on large payloads. 
 

@@ -111,7 +111,7 @@ The evaluation produces three concrete artifacts that other teams downstream dep
 
 ## 7. What to do if the answer is "no"
 
-If the test matrix shows the engine cannot deliver acceptable resource cost at the throughputs and payload sizes other teams actually need — for example, if the 10 MB × 100 ev/s scenario consistently OOMKills at any memory limit short of multiple GB — then the answer to "should we recommend this?" is *no, not in its current shape*.
+If the test matrix shows the engine cannot deliver acceptable resource cost at the throughputs and payload sizes other teams actually need — for example, if the 5 MB × 100 ev/s scenario consistently OOMKills at any memory limit short of multiple GB — then the answer to "should we recommend this?" is *no, not in its current shape*.
 
 Possible structural responses in that case (not in scope for this hub, but worth naming). Each is paired with the **signal in the test results that points to it** — knowing why a scenario failed is half the work of picking the right fix:
 
@@ -122,7 +122,7 @@ Possible structural responses in that case (not in scope for this hub, but worth
   *Signal to pick this:* memory spikes coincide with individual large payloads landing, and shortening the buffer window doesn't help in simulation. Per-record size, not aggregate volume, is the driver.
 
 - **Reject oversized payloads at the SDK layer.** Document a hard maximum (e.g. 1 MB) and tell teams with tensor-sized records to use a different system. Narrows the adoption envelope but keeps the engine cheap.
-  *Signal to pick this:* the smaller-payload columns (1 KB, 100 KB, 1 MB) are all viable; only the 10 MB column fails. The engine works for the bulk of the expected adoption population and the failing tail is a minority.
+  *Signal to pick this:* the smaller-payload columns (1 KB, 100 KB, 1 MB) are all viable; only the 5 MB column fails. The engine works for the bulk of the expected adoption population and the failing tail is a minority.
 
 - **Raise default resource limits.** Bump the injector's default memory limit upward (e.g. `512Mi` → `2Gi`) and accept that every adopting pod pays the cost regardless of its actual payload mix.
   *Signal to pick this:* all scenarios fail by small margins, and the target EKS clusters have memory headroom to spare. The cheapest structural change because no code moves — but it shifts cost to every adopter, so it's the wrong call if any adopter is memory-constrained.

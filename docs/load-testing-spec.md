@@ -18,7 +18,7 @@ The primary question is:
 Secondary outputs:
 - How fast does the RocksDB ephemeral PVC fill up at each event-size/rate combination (informs `rocksdbStorageSize`)
 - How does flush latency (time from CF rotation to Nessie commit) scale with payload volume
-- Whether the current 128 MB `MAX_PAYLOAD_SIZE` cap in the UDS server is a practical concern at the 10 MB event size
+- Whether the current 128 MB `MAX_PAYLOAD_SIZE` cap in the UDS server is a practical concern at the 5 MB event size
 
 ---
 
@@ -46,18 +46,18 @@ The independent variables and their levels:
 
 | Variable | Levels |
 |---|---|
-| **Event size** (size of `payload` field) | 1 KB · 100 KB · 1 MB · 10 MB |
+| **Event size** (size of `payload` field) | 1 KB · 100 KB · 1 MB · 5 MB |
 | **Event rate** | 1 · 10 · 100 · 500 events/sec |
 | **Duration** | 15 min (covers at least one full flush cycle) |
 
-This produces a 4 × 4 matrix of 16 scenarios. Not all combinations are meaningful — a 10 MB payload at 500 events/sec (5 GB/sec into a sidecar with 512 Mi memory limit) will OOMKill immediately. Run scenarios in order of increasing stress and stop a series early if the sidecar is evicted.
+This produces a 4 × 4 matrix of 16 scenarios. Not all combinations are meaningful — a 5 MB payload at 500 events/sec (2.5 GB/sec into a sidecar with 512 Mi memory limit) will OOMKill immediately. Run scenarios in order of increasing stress and stop a series early if the sidecar is evicted.
 
 ### Recommended run order
 
 Start with the diagonal (moderate stress per cell), then fill in neighbours:
 
 ```
-         1 KB    100 KB    1 MB    10 MB
+         1 KB    100 KB    1 MB    5 MB
 1/s     [ 1 ]   [ 2 ]    [ 3 ]   [ 4 ]
 10/s    [ 5 ]   [ 6 ]    [ 7 ]   [ 8 ]
 100/s   [ 9 ]   [10 ]    [11 ]   [14 ]
