@@ -139,31 +139,16 @@ curl -X POST http://k8s-node-1.local/loadtest/start `
 > [!TIP]
 > **Automated Execution**: You do not need to run this manually! Use the AI skill located at [`skills/run-load-test-sweep.md`](../skills/run-load-test-sweep.md). Simply ask an AI agent connected to the Grafana MCP server to "Use your skill to run the load test sweep", and it will handle execution, monitoring, and populating the results automatically.
 
-Walk the 13 non-skip cells of the §3 matrix in one go, with a 60-second rest between cells so RocksDB can drain:
+Walk the 13 non-skip cells of the §3 matrix in one go, with a 60-second rest between cells so RocksDB can drain.
+
+> [!WARNING]
+> Do **NOT** pass all cells to the `/loadtest/sweep` endpoint in a single raw HTTP request. The sandbox pre-allocates templates for all cells concurrently, which will cause a `java.lang.OutOfMemoryError` on large payloads.
+
+Instead, use the provided wrapper script which iterates through the matrix and calls the backend for each cell sequentially:
 
 ```powershell
-curl -X POST http://k8s-node-1.local/loadtest/sweep `
-     -H 'Content-Type: application/json' `
-     -d @- <<'JSON'
-{
-  "restSecondsBetween": 60,
-  "cells": [
-    {"rate":1,   "payloadSizeBytes":1024,     "durationSec":900},
-    {"rate":1,   "payloadSizeBytes":102400,   "durationSec":900},
-    {"rate":1,   "payloadSizeBytes":1048576,  "durationSec":900},
-    {"rate":1,   "payloadSizeBytes":10485760, "durationSec":900},
-    {"rate":10,  "payloadSizeBytes":1024,     "durationSec":900},
-    {"rate":10,  "payloadSizeBytes":102400,   "durationSec":900},
-    {"rate":10,  "payloadSizeBytes":1048576,  "durationSec":900},
-    {"rate":10,  "payloadSizeBytes":10485760, "durationSec":900},
-    {"rate":100, "payloadSizeBytes":1024,     "durationSec":900},
-    {"rate":100, "payloadSizeBytes":102400,   "durationSec":900},
-    {"rate":100, "payloadSizeBytes":1048576,  "durationSec":900},
-    {"rate":500, "payloadSizeBytes":1024,     "durationSec":900},
-    {"rate":500, "payloadSizeBytes":102400,   "durationSec":900}
-  ]
-}
-JSON
+# Assuming you are in the micewriter-hub-v1 directory
+.\skills\run-load-sweep.ps1 -CellsJson (Get-Content ..\micewriter-sandbox-v1\sweep.json -Raw)
 ```
 
 The full sweep takes ~3.5 hours (13 × 15 min + 12 × 60 s rest). Run it overnight.

@@ -53,19 +53,22 @@ $$ R_{eff} = R_{in} $$
 ### Case C: Over-Capacity (Burst & Backpressure)
 If the input byte rate outpaces the background engine ($R_{in} \times S_{msg} > R_{io}$), the buffer fills up.
 
-First, calculate the time it takes to fill the buffer ($t_{fill}$):
-$$ t_{fill} = \frac{C_{max}}{(R_{in} \times S_{msg}) - R_{io}} $$
+First, the background flush thread cannot start until the first CF reaches the flush size. So for the first $t_{idle}$ seconds, the background thread does no work:
+$$ t_{idle} = \frac{L_{flush}}{R_{in} \times S_{msg}} $$
+
+Calculate the time it takes to fill the entire buffer ($t_{fill}$), taking this idle time into account:
+$$ t_{fill} = \frac{L_{flush}}{R_{in} \times S_{msg}} + \frac{C_{max} - L_{flush}}{(R_{in} \times S_{msg}) - R_{io}} $$
 
 **If $T_{test} \le t_{fill}$ :**
 The test ends before the buffer is exhausted. Backpressure never triggers.
 $$ R_{eff} = R_{in} $$
 
 **If $T_{test} > t_{fill}$ :**
-The system accepts traffic freely for the first $t_{fill}$ seconds. Once the 2 retained CFs limit is hit (at expected ~256 MB), backpressure activates and the ingestion rate is strictly hard-capped to the background drain rate ($R_{io}$). 
+The system accepts traffic freely for the first $t_{fill}$ seconds. Once the 2 retained CFs limit is hit, backpressure activates and the ingestion rate is strictly hard-capped to the background drain rate ($R_{io}$). 
 
-The total bytes accepted over the entire window is the full buffer capacity ($E[C_{max}]$) plus whatever the background engine managed to process and drain during that time ($R_{io} \times T_{test}$). Dividing this by the time window and message size yields the average effective messages/sec:
+The total bytes accepted over the entire window is exactly the full buffer capacity ($E[C_{max}]$) plus whatever the background engine managed to process during its active time ($T_{test} - t_{idle}$). Dividing this total by the time window and message size yields the average effective messages/sec:
 
-$$ R_{eff} = \frac{R_{io} + \frac{L_{flush} \times N_{frozen}}{T_{test}}}{S_{msg}} $$
+$$ R_{eff} = \frac{\frac{E[C_{max}] + R_{io} \times \left(T_{test} - \frac{L_{flush}}{R_{in} \times S_{msg}}\right)}{T_{test}}}{S_{msg}} $$
 
 *(Note: If the math somehow yields a rate higher than $R_{in}$, $R_{eff}$ is capped at $R_{in}$.)*
 
@@ -82,12 +85,15 @@ Let's plug in the numbers for a 60-second high-throughput test:
 
 Input byte rate ($100$ MB/s) > $R_{io}$ ($74$ MB/s), so this becomes **Case C**!
 
-1. Calculate time to fill buffer:
-$$ t_{fill} = \frac{256 \text{ MB}}{100 \text{ MB/s} - 74 \text{ MB/s}} \approx 9.85 \text{ seconds} $$
+1. Calculate time to first flush (idle time):
+$$ t_{idle} = \frac{128 \text{ MB}}{100 \text{ MB/s}} = 1.28 \text{ seconds} $$
 
-2. Because $T_{test}$ (60s) > $t_{fill}$ (9.85s), the system hits backpressure after about 9.85 seconds.
+2. Calculate time to fill buffer completely:
+$$ t_{fill} = 1.28 \text{ s} + \frac{256 \text{ MB} - 128 \text{ MB}}{100 \text{ MB/s} - 74 \text{ MB/s}} = 1.28 + \frac{128}{26} \approx 6.20 \text{ seconds} $$
 
-3. Calculate average effective throughput:
-$$ R_{eff} = \frac{74 + \frac{256}{60}}{1} = \frac{74 + 4.26}{1} \approx 78.26 \text{ ev/s} $$
+3. Because $T_{test}$ (60s) > $t_{fill}$ (6.20s), the system hits backpressure.
 
-**Conclusion:** The engine safely applies backpressure to shed the excess load, completely preventing OOMKills. Thanks to dynamic parameter scaling and bounded queue depths, the system's effective throughput $R_{eff}$ gracefully degrades to a staggering **~78.26 MB/s**, perfectly matching the hardware capacity without memory corruption!
+4. Calculate average effective throughput:
+$$ R_{eff} = \frac{\frac{256 + 74 \times (60 - 1.28)}{60}}{1} = \frac{\frac{256 + 4345.28}{60}}{1} \approx 76.68 \text{ ev/s} $$
+
+**Conclusion:** The engine safely applies backpressure to shed the excess load, completely preventing OOMKills. Thanks to dynamic parameter scaling and bounded queue depths, the system's effective throughput $R_{eff}$ gracefully degrades to a staggering **~76.68 MB/s**, perfectly matching the hardware capacity without memory corruption!

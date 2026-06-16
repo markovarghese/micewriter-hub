@@ -39,7 +39,12 @@ $env:GRAFANA_TOKEN='glc_...'; $env:GRAFANA_PROM_USER='<instance-id>'   # Basic a
 ./skills/run-load-cell.ps1 -Rate 500 -PayloadBytes 1048576 -DurationSec 180
 ```
 
-If `GRAFANA_PROM_URL` is unset the script prints the run window + the exact PromQL so the orchestrator can fetch peaks via the **Grafana MCP** instead (`query_prometheus`, range or `max_over_time(...[5m:15s])` instant — range is more reliable for short windows).
+If `GRAFANA_PROM_URL` is unset the script prints the run window + the exact PromQL so the orchestrator can fetch peaks via the **Grafana MCP** instead.
+
+> [!WARNING]
+> **DO NOT blindly copy the printed `N/A` placeholders into `results.md`!** You MUST execute the queries using the `query_prometheus` tool before recording the results. 
+> 
+> **MCP Tool Usage Note**: When calling `query_prometheus`, you must provide the following exact parameters: `queryType="instant"`, `datasourceUid="grafanacloud-prom"`, `expr="<PromQL>"`, and `endTime="<end_time_in_RFC3339>"` (e.g., `endTime="2026-06-16T00:18:07Z"`). The tool will fail if you use `time` instead of `endTime`.
 
 **Starting a run without the script** (if you need manual control): `POST http://k8s-node-1.local/loadtest/sweep` with `{ "restSecondsBetween": N, "cells": [ {rate, payloadSizeBytes, durationSec}, ... ] }`; poll `GET /loadtest/{runId}` until `status != "RUNNING"`. If an agent on the main thread is orchestrating long waits, use a single `ScheduleWakeup` (delay = total run seconds + buffer) rather than polling — see "Model & agent guidance".
 
@@ -77,32 +82,23 @@ The 13 non-skip cells of the test matrix (1/10/100/500 ev/s × 1 KB/100 KB/1 MB/
 
 Do **NOT** pass all cells to `/loadtest/sweep` in a single request — the sandbox pre-allocates templates for all cells concurrently, which will cause a `java.lang.OutOfMemoryError` on large payloads. 
 
-Instead, iterate through the matrix using a PowerShell script and call `skills/run-load-cell.ps1` for each cell sequentially:
+Instead, use the `run-load-sweep.ps1` wrapper script. This script reads an array of cells (from a JSON file or string) and sequentially calls `run-load-cell.ps1` for each one, avoiding the sandbox OOM limitation.
 
 ```powershell
-# Iterate one-by-one to avoid sandbox OOM
-$cells = @(
-  @{rate=1;   payloadSizeBytes=1024;     durationSec=900},
-  @{rate=1;   payloadSizeBytes=102400;   durationSec=900},
-  @{rate=1;   payloadSizeBytes=1048576;  durationSec=900},
-  @{rate=1;   payloadSizeBytes=10485760; durationSec=900},
-  @{rate=10;  payloadSizeBytes=1024;     durationSec=900},
-  @{rate=10;  payloadSizeBytes=102400;   durationSec=900},
-  @{rate=10;  payloadSizeBytes=1048576;  durationSec=900},
-  @{rate=10;  payloadSizeBytes=10485760; durationSec=900},
-  @{rate=100; payloadSizeBytes=1024;     durationSec=900},
-  @{rate=100; payloadSizeBytes=102400;   durationSec=900},
-  @{rate=100; payloadSizeBytes=1048576;  durationSec=900},
-  @{rate=500; payloadSizeBytes=1024;     durationSec=900},
-  @{rate=500; payloadSizeBytes=102400;   durationSec=900}
-)
+# You can pass a JSON array string directly:
+$diag = '[{"rate":1, "payloadSizeBytes":1024}, {"rate":10, "payloadSizeBytes":102400}]'
+.\skills\run-load-sweep.ps1 -CellsJson $diag -DurationSecOverride 900
 
-foreach ($c in $cells) {
-    & "skills\run-load-cell.ps1" -Rate $c.rate -PayloadBytes $c.payloadSizeBytes -DurationSec $c.durationSec -RestSec 60
-}
+# Or read from a JSON file (like the provided sweep.json):
+$sweepJson = Get-Content .\sweep.json -Raw
+.\skills\run-load-sweep.ps1 -CellsJson $sweepJson
 ```
 
-Run this loop script in the background. The `run-load-cell.ps1` script will handle the blocking wait and print the formatted markdown table row for each cell. You will be automatically notified when the background task completes, at which point you can collect all the printed rows and append them to `results.md`.
+Run this loop script in the background. The `run-load-cell.ps1` script will handle the blocking wait and print the formatted markdown table row for each cell. 
+
+> [!CAUTION]
+> You will be automatically notified when the background task completes, but **the printed rows will contain `N/A | N/A` for Peak CPU and Peak Memory**. 
+> You MUST manually query the Grafana MCP server using the provided time windows and PromQL queries to fill in these missing values *before* appending the rows to `results.md`!
 
 ---
 

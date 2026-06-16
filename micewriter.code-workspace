@@ -23,6 +23,10 @@
     {
       "name": "micewriter-local-infra (Local Data Lake)",
       "path": "../micewriter-local-infra-v1"
+    },
+    {
+      "name": "k3sonhyperv (Kubernetes Cluster)",
+      "path": "../k3sonhyperv"
     }
   ],
   "settings": {
