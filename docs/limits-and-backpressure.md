@@ -91,13 +91,14 @@ sequenceDiagram
 * **Throughput**: 100 MB / sec.
 * **Payload Limit**: 1 MB is under the 16 MB limit.
 * **The Reality (Dynamic Hardware-Aware Pipelining)**:
-  At 100 MB/sec, the active CF hits its 128 MB limit and rotates every ~1.3 seconds. The background `flush_engine` uses a double-buffered pipelined architecture (queue depth=2) to stream the Arrow IPC data into Iceberg Parquet files. At `conc=2` under a 512Mi pod limit, the pipeline sustains ~74 MB/s.
+  At 100 MB/sec, the active CF hits its 128 MB limit and rotates every ~1.3 seconds. The background `flush_engine` uses a double-buffered pipelined architecture (queue depth=2) to stream the Arrow IPC data into Iceberg Parquet files. At `conc=2` under a 512Mi pod limit, the pipeline sustains **~53.6 MB/s**.
 * **Healthy Backpressure in Action**:
-  1. Because the host application generates data faster (100 MB/s) than the engine can process it (~74 MB/s), the engine begins accumulating frozen CFs.
-  2. Within ~6.7 seconds, the `MAX_RETAINED_FROZEN_CFS` limit of 2 (and the 384 MB shadow limit) is hit.
-  3. The engine begins rejecting IPC requests with a "backpressure" error. With `send()` the SDK surfaces this as a `RuntimeException` (the caller decides to drop); with `sendAsync()` the client-side in-flight window (§1) has usually already throttled the producer before the engine even has to reject.
-  4. The host application continues to run without experiencing OOM crashes or thread-pool exhaustion! The engine's memory safely rides under 512Mi (peak ~416Mi working set).
-* **Result**: The engine smoothly sustains ~74 MB/s of ingestion without dropping the pod, gracefully shedding the excess load via backpressure.
+  1. Because the host application generates data faster (100 MB/s) than the engine can process it (~53.6 MB/s), the engine begins accumulating frozen CFs.
+  2. Within a few seconds, the `MAX_RETAINED_FROZEN_CFS` limit of 2 (and the 384 MB shadow limit) is hit.
+  3. Instead of actively rejecting payloads, the engine enters a `sleep` loop, intentionally delaying ACKs back to the client. 
+  4. The delayed ACKs cause the SDK's pipelined `sendAsync()` in-flight window (capped at 8 MiB) to quickly fill up. Once full, the SDK gracefully **blocks** the host application's producer thread.
+  5. The host application's generation rate is perfectly capped to match the engine's exact drain rate (~53.6 MB/s), resulting in **zero failures or dropped payloads**. The engine's memory safely rides under 512Mi.
+* **Result**: The engine smoothly sustains ~53.6 MB/s of ingestion without dropping the pod, gracefully throttling the host application via full-stack backpressure.
 
 ```mermaid
 sequenceDiagram
@@ -111,16 +112,18 @@ sequenceDiagram
     UDS->>ActiveCF: Append
     Note over ActiveCF,Flush: Active CF hits 128 MB and rotates
     Flush->>Flush: Dynamic Multi-Threaded Pipeline
-    Note over ActiveCF,Flush: Pipeline streams data at ~74 MB/s
+    Note over ActiveCF,Flush: Pipeline streams data at ~53.6 MB/s
     App->>SDK: Send next 1 MB event
     SDK->>UDS: IPC Message
     Note over UDS: Retained CF limit is hit (256 MB backlog)!
-    UDS-->>SDK: AckResponse::error(backpressure)
-    SDK-->>App: Drop event (graceful degradation)
-    Note over App,UDS: Host app avoids OOM.
+    UDS->>UDS: Engine sleeps, delaying ACK
+    Note over SDK: 8 MiB in-flight window fills
+    SDK-->>App: Block producer thread (throttled)
+    Note over App,UDS: Host app rate matches engine (~53.6 MB/s)
     Flush->>Flush: Concurrent S3 uploads complete
     Flush->>ActiveCF: Drops oldest Frozen CF
-    App->>SDK: Next event (Accepted)
+    UDS-->>SDK: Delayed ACK returned
+    SDK-->>App: Unblocks producer thread
 ```
 
 ---

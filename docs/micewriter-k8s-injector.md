@@ -28,7 +28,6 @@ Intersects the Kubernetes API during Pod creation. If the incoming pod carries t
    | `NESSIE_WAREHOUSE` | Iceberg warehouse path (e.g. `s3://iceberg`) |
    | `SOCKET_PATH` | Absolute UDS socket path (`/var/run/app/iceberg.sock`) |
    | `ROCKSDB_PATH` | RocksDB data directory (`/var/lib/rocksdb`) |
-   | `ENABLE_MANUAL_FLUSH` | Allows `FLUSH_NOW` IPC command — set `"true"` in non-production to enable integration tests; leave `"false"` in production to protect the catalog from API abuse |
 3. **IPC Socket:** Mounts an `emptyDir` shared volume into all standard containers **and** `InitContainers` to allow the Java app and Rust engine to communicate over the Unix Domain Socket (`/var/run/app`).
 4. **RocksDB Cache:** Dynamically provisions a Generic Ephemeral Volume to attach a high-IOPS Persistent Volume Claim (PVC) exclusively for RocksDB caching, tied 1-to-1 to the pod's lifecycle.
 5. **Idempotency:** Safely skips volume addition if standard definitions already exist, preventing validation errors.

@@ -202,7 +202,7 @@ An "engine OOMKilled at 512 Mi" result is only trustworthy if (a) MinIO and Ness
 
 ### 5.5 Force a flush at end of test (optional)
 
-If you don't want to wait for the 10-minute jitter window, trigger a manual flush immediately after the load generator finishes. `ENABLE_MANUAL_FLUSH=true` is set by default in the local injector values:
+If you don't want to wait for the 10-minute jitter window, trigger a manual flush immediately after the load generator finishes. `ENABLE_MANUAL_FLUSH=true` is natively enabled by default in the engine:
 
 ```powershell
 curl -X POST http://k8s-node-1.local/events/flush
