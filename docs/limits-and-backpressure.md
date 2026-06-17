@@ -24,6 +24,11 @@ This table is the **canonical source of truth** for the engine's tunables. Every
 | Parquet row-group bytes | `PARQUET_ROW_GROUP_BYTES` | **8 MiB** | Row groups roll at this size; rows-per-group derived per-table from average record size |
 | Target Parquet file size | `TARGET_PARQUET_BYTES` | **64 MiB** | Output file roll target (set to `128Mi` for Trino-optimized files) |
 | Parquet compression | `PARQUET_COMPRESSION` | **SNAPPY** | `NONE` \| `SNAPPY` \| `ZSTD` |
+| Compile batch size | `FLUSH_COMPILE_BATCH_SIZE` | **1 000 records** | Records buffered per JSON→Arrow compile batch during flush |
+| Compile batch bytes | `FLUSH_COMPILE_BATCH_BYTES` | **4 MB** | Max raw JSON bytes per compile batch — *recomputed at startup* (see below) |
+| RocksDB write buffer | `WRITE_BUFFER_SIZE` | **64 MB** | RocksDB memtable size — *recomputed at startup* (see below) |
+| Concurrent CF flushes | `CONCURRENT_CF_FLUSHES` | **2** | Number of column families flushed in parallel |
+| Parser threads | `PARSER_THREADS` | **CPU cores** | Parallel JSON→Arrow compilation threads (defaults to `available_parallelism`) |
 | Manual flush | `ENABLE_MANUAL_FLUSH` | **true** | Exposes the `FLUSH_NOW` IPC command (disable in production) |
 | RocksDB fsync | `ROCKSDB_SYNC_WRITES` | **true** | fsync each write batch before ACK |
 | Socket path | `SOCKET_PATH` | `/var/run/app/iceberg.sock` | Shared UDS path |
@@ -31,6 +36,12 @@ This table is the **canonical source of truth** for the engine's tunables. Every
 | Catalog | `CATALOG_TYPE` | `nessie` | `nessie` (Iceberg REST) or `glue` |
 | Warehouse | `WAREHOUSE` (fallback `NESSIE_WAREHOUSE`) | `s3://iceberg` | Iceberg warehouse prefix |
 | Memory limit | `ENGINE_MEM_LIMIT_BYTES` | 512 MiB | Drives dynamic sizing of batches/buffers/concurrency |
+
+> **Dynamic hardware-aware sizing.** Two of the values above are **recomputed at engine startup** from `ENGINE_MEM_LIMIT_BYTES` and `PARSER_THREADS`, overriding their env defaults — this is what keeps the engine memory-safe under tight cgroup limits:
+> - `flush_compile_batch_bytes` ≈ `(ENGINE_MEM_LIMIT_BYTES / 100) / PARSER_THREADS`, with a 256 KB floor (budgets ~1% of memory for raw JSON, which expands under `arrow_json` overhead).
+> - `write_buffer_size` = `4 MB × PARSER_THREADS`, capped at 64 MB.
+>
+> So on a constrained 1-core / 512 MiB sidecar the effective batch and write-buffer sizes are well below the static defaults shown in the table.
 
 RocksDB additionally runs with **Direct I/O** (`set_use_direct_reads` + `set_use_direct_io_for_flush_and_compaction`) and **SST compression disabled** (`DBCompressionType::None`); block checksums use hardware CRC32C where the CPU exposes it.
 

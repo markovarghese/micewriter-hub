@@ -16,13 +16,13 @@ Intersects the Kubernetes API during Pod creation. If the incoming pod carries t
 
 ### Injections Performed
 1. **The Sidecar:** Injects the `micewriter-engine` container image into the pod, applying dynamically configurable resource requests/limits and least-privilege security contexts.
-2. **Environment Linking:** Injects the following environment variables into the sidecar. Most are sourced from the webhook's Helm values at deploy-time; the MinIO credentials are wired via a `secretKeyRef` (Secret `micewriter-engine-credentials`), and `SOCKET_PATH` / `ROCKSDB_PATH` / `ENGINE_MEM_LIMIT_BYTES` are computed by the webhook rather than read from Helm:
+2. **Environment Linking:** Injects the following environment variables into the sidecar as **plain `value` env entries**. Most are sourced from the webhook's own configuration (its Helm values) at deploy-time; `SOCKET_PATH` / `ROCKSDB_PATH` / `ENGINE_MEM_LIMIT_BYTES` are computed by the webhook rather than read from Helm. (The MinIO credentials reach the *webhook* via a `secretKeyRef` on its own Deployment, but the webhook then writes them onto the sidecar as plain values — it does not propagate a `secretKeyRef` to the mutated pod.)
 
    | Variable | Purpose |
    |---|---|
    | `MINIO_URL` | MinIO S3 API endpoint |
-   | `MINIO_ACCESS_KEY` | MinIO credentials (via `secretKeyRef`) |
-   | `MINIO_SECRET_KEY` | MinIO credentials (via `secretKeyRef`) |
+   | `MINIO_ACCESS_KEY` | MinIO credentials |
+   | `MINIO_SECRET_KEY` | MinIO credentials |
    | `MINIO_BUCKET` | Target S3 bucket for Parquet files |
    | `NESSIE_URI` | Nessie Iceberg REST catalog endpoint |
    | `NESSIE_WAREHOUSE` | Iceberg warehouse path (e.g. `s3://iceberg`) |
