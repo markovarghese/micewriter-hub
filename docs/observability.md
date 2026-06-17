@@ -8,7 +8,7 @@ These metrics are designed to be ingested by Prometheus (via Grafana Alloy) and 
 
 ![Observability Flow Diagram](diagrams/observability-flow.svg)
 
-mIceWriter exposes a lightweight Prometheus `/metrics` endpoint on the Axum debug server. This allows us to track both internal operations and the IPC (Inter-Process Communication) interface without introducing any noticeable overhead on the ingestion hot-path. 
+mIceWriter exposes a lightweight Prometheus `/metrics` endpoint on the Axum debug server bound to `0.0.0.0:8088` (the same server also serves `/debug/pprof/flamegraph`). This allows us to track both internal operations and the IPC (Inter-Process Communication) interface without introducing any noticeable overhead on the ingestion hot-path. 
 
 We use atomic counters (`AtomicU64`) to ensure zero lock contention when metrics are incremented inside the multi-threaded ingestion pipeline.
 
@@ -21,7 +21,7 @@ The engine provides the following custom Prometheus metrics:
 | `engine_parquet_files_written_total` | Counter | None | Total number of Parquet file objects written to MinIO/S3. |
 | `engine_parquet_bytes_written_total` | Counter | None | Total size of Parquet files written in bytes. |
 | `engine_catalog_commits_total` | Counter | None | Number of successful append commits made to the Nessie catalog. |
-| `engine_ipc_requests_total` | Counter | `type` | Number of requests received from the SDK (e.g. `register_schema`, `ingest_record`, `flush_now`). |
+| `engine_ipc_requests_total` | Counter | `req_type` | Number of requests received from the SDK (e.g. `register_schema`, `ingest_record`, `flush_now`). |
 | `engine_ipc_responses_total` | Counter | `status` | Number of responses sent back to the SDK (e.g. `ok`, `error`). |
 
 ## Grafana Dashboard Overview
@@ -30,7 +30,7 @@ The official mIceWriter Grafana dashboard provides a single pane of glass to mon
 
 The dashboard includes the following 8 critical visualizations:
 
-1. **Parquet Files Written to MinIO**: Shows both the throughput rate in Bytes/sec and Files/sec. Extremely useful for validating the 10-minute/32 MB batching behavior.
+1. **Parquet Files Written to MinIO**: Shows both the throughput rate in Bytes/sec and Files/sec. Extremely useful for validating the ~5-minute/~128 MB batching behavior.
 2. **Nessie Catalog Commits**: The rate of commits hitting the Iceberg catalog.
 3. **SDK Calls to Engine**: Breakdown of IPC traffic types (Ingestion vs Schema Registration).
 4. **Engine Responses to SDK**: Success vs Error rates for the IPC traffic.
@@ -46,6 +46,8 @@ The dashboard includes the following 8 critical visualizations:
 To deploy the dashboard:
 1. Import the `grafana-dashboard.json` file (located in the `dashboards` directory next to this file) into your Grafana Cloud instance.
 2. Ensure your local Kubernetes cluster has Grafana Alloy (or another Prometheus agent) configured to scrape pod metrics and Remote Write them to your Grafana Cloud endpoint.
+
+> **How the engine's `:8088` is scraped:** the mutating webhook does **not** add scrape annotations. Instead, the *application* deployment carries them on its pod template, pinned to the engine sidecar — e.g. the sandbox's `k8s/deployment.yaml` sets `k8s.grafana.com/scrape: "true"`, `k8s.grafana.com/metrics.path: /metrics`, `k8s.grafana.com/metrics.portNumber: "8088"`, and `k8s.grafana.com/metrics.container: micewriter-engine` (plus the equivalent `prometheus.io/*` annotations). Adopting apps that want engine metrics must add the same annotations to their own pod template.
 
 ## Connecting an AI Agent (Grafana MCP)
 

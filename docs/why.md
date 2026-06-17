@@ -28,7 +28,7 @@ Direct Iceberg writes from each application replica mean every replica must hold
 
 ## 2. The solution
 
-A **per-pod sidecar** — the [`micewriter-engine`](micewriter-engine.md) — that the application talks to over a Unix Domain Socket inside the pod boundary. The application emits records at microsecond latency; the sidecar absorbs them into a local RocksDB buffer; a jittered background flush consolidates roughly 10 minutes (or 128 MB) of records into appropriately-sized Parquet files and atomically commits them to the Iceberg catalog.
+A **per-pod sidecar** — the [`micewriter-engine`](micewriter-engine.md) — that the application talks to over a Unix Domain Socket inside the pod boundary. The application emits records at microsecond latency; the sidecar absorbs them into a local RocksDB buffer; a jittered background flush consolidates roughly 5 minutes (or ~128 MB) of records into appropriately-sized Parquet files and atomically commits them to the Iceberg catalog.
 
 This shifts every one of the four pains:
 
@@ -36,7 +36,7 @@ This shifts every one of the four pains:
 |---|---|
 | **S3 latency** | Out of the hot path entirely. The UDS write returns in microseconds. |
 | **JVM heap pressure** | Off the JVM. Records leave the application as JSON bytes; buffering happens in RocksDB on a dedicated ephemeral PVC. |
-| **Small files** | Solved at the platform layer. The hybrid time/size flush window (10 minutes or 128 MB) batches records into Parquet files sized for analytics. |
+| **Small files** | Solved at the platform layer. The hybrid time/size flush window (~5 minutes or ~128 MB) batches records into Parquet files sized for analytics. |
 | **Catalog coupling** | One sidecar per pod owns the Glue (or Nessie) commit, with exponential backoff on optimistic-lock failures. |
 
 > 👉 **Want to see how this is built?** Jump to the **[system overview](system-overview.md)** for the full data flow, IPC protocol, and flush-cycle design — then come back to §3 below for the adoption decision.
@@ -60,7 +60,7 @@ The [mutating webhook](micewriter-k8s-injector.md) injects the engine sidecar co
 Run through this checklist. If you can't say "yes" to all five, talk to the platform team before annotating your pod:
 
 1. **You need to persist records to Apache Iceberg** — not a queue, not a transactional database, not a search index. The sidecar is purpose-built for Iceberg and offers nothing for other destinations.
-2. **Your records can tolerate ~10-minute write-to-queryable latency.** Data emitted via `icebergTemplate.send()` becomes queryable only after the next flush cycle commits to the catalog (max ~10 mins or 128 MB). If you need to read what you just wrote within seconds, use a different system.
+2. **Your records can tolerate ~5-minute write-to-queryable latency.** Data emitted via `icebergTemplate.send()` becomes queryable only after the next flush cycle commits to the catalog (~5 min, or sooner if the ~128 MB rotation threshold is reached). If you need to read what you just wrote within seconds, use a different system.
 3. **Your average payload is under ~1 MB, with occasional records strictly up to 16 MB.** The system enforces a hard 16 MB cap per payload to protect the sidecar's 512 MiB memory boundary from exploding during JSON-to-Arrow schema parsing. Any single payload exceeding 16 MB is instantly rejected by both the SDK and Engine.
 4. **You're emitting fewer than ~500 records/sec per pod sustained.** *(Final per-pod throughput envelope set by [feasibility evaluation](feasibility.md) results.)* Higher rates may work but require explicit sizing and a re-run of the load test matrix for your specific payload shape.
 5. **You don't need exactly-once durability across pod restarts.** A pod that dies before its SIGTERM emergency-flush completes can lose the records still in its RocksDB buffer. If every record must be durable from the moment of emit, the sidecar is not sufficient on its own — pair it with a synchronous write to a durable queue.
@@ -73,7 +73,7 @@ If your use case sits outside this envelope, the answer is not necessarily "no" 
 
 mIceWriter is deliberately narrow. The following are **out of scope** and applications needing them should look elsewhere:
 
-- **Sub-10-minute (or < 32 MB) read-after-write.** Records become queryable after the flush cycle commits to the catalog, not on emit. Applications that need live state (e.g., serving the same data they just wrote) should use a different system in parallel.
+- **Sub-5-minute (or < ~128 MB) read-after-write.** Records become queryable after the flush cycle commits to the catalog, not on emit. Applications that need live state (e.g., serving the same data they just wrote) should use a different system in parallel.
 - **Row-level updates or deletes.** The engine is append-only. Puffin deletion vectors and merge-on-read are deferred to asynchronous Iceberg maintenance jobs run outside the sidecar.
 - **Cross-pod coordination.** Each sidecar owns its pod's records and commits independently. There is no shared queue, no leader election, no fan-in across replicas.
 - **Exactly-once durability across pod restarts.** A pod that dies before its `SIGTERM` emergency-flush completes can lose records still in the RocksDB buffer. Applications with stronger durability requirements should not use this system as their only persistence layer.

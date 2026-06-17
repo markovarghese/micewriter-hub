@@ -18,7 +18,7 @@ The primary question is:
 Secondary outputs:
 - How fast does the RocksDB ephemeral PVC fill up at each event-size/rate combination (informs `rocksdbStorageSize`)
 - How does flush latency (time from CF rotation to Nessie commit) scale with payload volume
-- Whether the current 128 MB `MAX_PAYLOAD_SIZE` cap in the UDS server is a practical concern at the 5 MB event size
+- Whether the **16 MB `MAX_PAYLOAD_SIZE`** per-message cap in the UDS server is a practical concern at the largest event sizes (this is the per-record frame limit, distinct from the 128 MB CF rotation size)
 
 ---
 
@@ -31,7 +31,7 @@ All metrics land in **Grafana Cloud** via the Grafana Alloy DaemonSet already in
 | Engine CPU (used) | cAdvisor → Grafana Cloud | `rate(container_cpu_usage_seconds_total{namespace="micewriter-sandbox", container="micewriter-engine"}[1m])` |
 | Engine memory (used) | cAdvisor → Grafana Cloud | `container_memory_working_set_bytes{namespace="micewriter-sandbox", container="micewriter-engine"}` |
 | RocksDB PVC utilisation | kubelet → Grafana Cloud | `kubelet_volume_stats_used_bytes{persistentvolumeclaim=~"rocksdb-.*"}` |
-| Engine flush latency | Engine logs → Loki | LogQL: `{namespace="micewriter-sandbox", container="micewriter-engine"} \|~ "rotating column family\|Table flushed"` — measure the wall-clock gap between rotation and commit |
+| Engine flush latency | Engine logs → Loki | LogQL: `{namespace="micewriter-sandbox", container="micewriter-engine"} \|~ "Column family rotated\|Iceberg commit successful"` — measure the wall-clock gap between rotation and commit |
 | MinIO throughput / errors | MinIO Prometheus endpoint → Grafana Cloud | `rate(minio_s3_traffic_received_bytes_total[1m])`, `rate(minio_s3_requests_errors_total[1m])` |
 | Nessie commit latency | Nessie Quarkus metrics → Grafana Cloud | `histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri=~".*iceberg.*"}[1m]))` |
 | Sandbox send rate / latency / errors | Micrometer → Grafana Cloud | `rate(micewriter_loadtest_events_sent_total[1m])`, `micewriter_loadtest_send_seconds` histogram |
@@ -64,7 +64,7 @@ Start with the diagonal (moderate stress per cell), then fill in neighbours:
 500/s   [12 ]   [13 ]    [15 ]   [16 ]
 ```
 
-*Note: Previously, the highest-load scenarios (14, 15, 16) were marked as `skip` because they caused the engine to OOM. With the new 4-stage streaming pipeline (and strictly limiting concurrency for huge payloads), the engine's memory footprint is bounded regardless of the input rate or payload size. The engine will gracefully apply backpressure, so all 16 scenarios are now safe to run!*
+*Note: The **engine's** memory footprint is bounded regardless of input rate or payload size — it applies graceful backpressure rather than OOMing (validated through the 2026-06-16 diagonal). The remaining limit is on the **sandbox load generator**, not the engine: at the largest cell (5 MB × 500/s) the sandbox JVM throws `OutOfMemoryError` in `LoadTestService.buildCell` while pre-allocating payload templates, before any traffic is sent. Treat the top-stress corner as a load-generator constraint to size around (raise the sandbox heap or shrink the template pool), not an engine result.*
 
 ---
 
@@ -101,7 +101,7 @@ kubectl get pod -n micewriter-sandbox
 kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine --tail=20
 ```
 
-Expected: log line `uds_server: listening on /var/run/app/iceberg.sock`.
+Expected: log line `UDS listener ready` (with the socket path field).
 
 ---
 
@@ -139,19 +139,19 @@ curl -X POST http://k8s-node-1.local/loadtest/start `
 > [!TIP]
 > **Automated Execution**: You do not need to run this manually! Use the AI skill located at [`skills/run-load-test-sweep.md`](../skills/run-load-test-sweep.md). Simply ask an AI agent connected to the Grafana MCP server to "Use your skill to run the load test sweep", and it will handle execution, monitoring, and populating the results automatically.
 
-Walk the 13 non-skip cells of the §3 matrix in one go, with a 60-second rest between cells so RocksDB can drain.
+Walk the cells of the §3 matrix in one go, with a 60-second rest between cells so RocksDB can drain. Two cell sets ship in the sandbox repo: `sweep.json` (the fuller matrix) and `diagonal.json` (a fast 4-cell diagonal — 1 KB×1/s, 100 KB×10/s, 1 MB×100/s, 5 MB×500/s — used for the 2026-06-16 run).
 
 > [!WARNING]
-> Do **NOT** pass all cells to the `/loadtest/sweep` endpoint in a single raw HTTP request. The sandbox pre-allocates templates for all cells concurrently, which will cause a `java.lang.OutOfMemoryError` on large payloads.
+> Do **NOT** pass all cells to the `/loadtest/sweep` endpoint in a single raw HTTP request. The sandbox pre-allocates templates for all cells concurrently, which will cause a `java.lang.OutOfMemoryError` on large payloads. (Even one large cell can OOM the load generator — see the 5 MB×500/s note in §3.)
 
-Instead, use the provided wrapper script which iterates through the matrix and calls the backend for each cell sequentially:
+Instead, use the provided wrapper script which iterates through the cells and calls the backend for each one sequentially:
 
 ```powershell
 # Assuming you are in the micewriter-hub-v1 directory
-.\skills\run-load-sweep.ps1 -CellsJson (Get-Content ..\micewriter-sandbox-v1\sweep.json -Raw)
+.\skills\run-load-sweep.ps1 -CellsJson (Get-Content ..\micewriter-sandbox-v1\diagonal.json -Raw)
 ```
 
-The full sweep takes ~3.5 hours (13 × 15 min + 12 × 60 s rest). Run it overnight.
+A 15-min-per-cell sweep takes roughly `(cells × 15 min) + ((cells − 1) × 60 s)` — the 4-cell diagonal at the 300 s duration used on 2026-06-16 is far quicker; the fuller `sweep.json` matrix is an overnight job.
 
 ### 5.3 Watch progress
 
@@ -196,13 +196,13 @@ If a scenario shows the engine OOMKilling, **verify the engine itself is the bot
 | Is Nessie CPU-throttled? | `rate(container_cpu_cfs_throttled_seconds_total{pod=~"micewriter-nessie.*"}[1m]) > 0` |
 | Is Nessie's commit slow? | `histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri=~".*iceberg.*"}[1m]))` |
 | Is the engine sidecar memory near limit? | `container_memory_working_set_bytes{container="micewriter-engine"} / 1024 / 1024` (compare against 512) |
-| Is the engine flush hanging? | LogQL: `{container="micewriter-engine"} \|~ "rotating column family\|commit succeeded"` and eyeball the time gap |
+| Is the engine flush hanging? | LogQL: `{container="micewriter-engine"} \|~ "Column family rotated\|Iceberg commit successful"` and eyeball the time gap |
 
 An "engine OOMKilled at 512 Mi" result is only trustworthy if (a) MinIO and Nessie throttle queries are zero in the same window, and (b) the engine pod's memory was actually climbing on its own rather than stalling while waiting on a slow flush partner.
 
 ### 5.5 Force a flush at end of test (optional)
 
-If you don't want to wait for the 10-minute jitter window, trigger a manual flush immediately after the load generator finishes. `ENABLE_MANUAL_FLUSH=true` is natively enabled by default in the engine:
+If you don't want to wait for the ~5-minute jitter window, trigger a manual flush immediately after the load generator finishes. `ENABLE_MANUAL_FLUSH=true` is natively enabled by default in the engine:
 
 ```powershell
 curl -X POST http://k8s-node-1.local/events/flush
@@ -210,7 +210,7 @@ curl -X POST http://k8s-node-1.local/events/flush
 
 ### 5.6 Verify timer flush
 
-To verify the engine's natural timer-driven flush cycle (10 min ± 2 min jittered) operates correctly without manual intervention, run a single scenario for 15 minutes (`durationSec=900`) at a modest rate:
+To verify the engine's natural timer-driven flush cycle (5 min ± 1 min jittered) operates correctly without manual intervention, run a single scenario for 15 minutes (`durationSec=900`) at a modest rate:
 
 ```powershell
 curl -X POST http://k8s-node-1.local/loadtest/start `
@@ -218,7 +218,7 @@ curl -X POST http://k8s-node-1.local/loadtest/start `
      -d '{"rate":10,"payloadSizeBytes":10240,"durationSec":900}'
 ```
 
-Wait for the timer to trigger (up to 12 minutes), then confirm the following:
+Wait for the timer to trigger (up to ~6 minutes), then confirm the following:
 
 1. **Flush log sequence**: Look for the timer trigger followed by a successful commit:
    ```powershell
@@ -228,7 +228,7 @@ Wait for the timer to trigger (up to 12 minutes), then confirm the following:
    ```
    Timer triggered flush
    Starting flush cycle
-   Column family rotated frozen=active
+   Column family rotated frozen=cf_1
    ...
    Iceberg commit successful table=load_test_events
    ```
@@ -246,15 +246,17 @@ After a manual sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sen
 
 | Timestamp (UTC) | Scenario | Event size | Rate (ev/s) | Duration | SDK p95 send | Achieved rate | Failed sends | Peak CPU | Peak Mem | OOMKill? | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 2026-06-09T15:16:33Z | Grid G4 | 1 MB | 500(lbl) | 180s | 1610 ms | 82.3 / s | 6 / 14832 | — | 244 MB | No | **128 MB FILES ACHIEVED AT DEFAULT conc=2 — NO OOM.** 128 MiB Trino target reachable with no concurrency cap / no RAM bump. |
-| 2026-06-10T03:54:43Z | STREAMING @ conc=1 | 1 MB | 100 | 90s | 3489 ms | 36.9 / s | 6 | — | 328 MiB | No | **PRODUCTION-VIABLE.** Single flush kept up with 100MiB/s ingest. 26 Iceberg commits, 15 streamed files all ~127 MiB. Nessie data-append snapshots confirmed. |
-| 2026-06-10T07:05:18Z | STREAMING @ conc=2 | 1 MB | 100 | 90s | 1913 ms | 73.6 / s | 65 / 6691 | 831m | 409 MiB RSS | No | **conc=2 PASSES under 512Mi — 74 MB/s.** Channel fixes (queue depth 2, UDS channel 8) bound pipeline. 53 Iceberg commits. |
+| 2026-06-16T00:12:37Z | Diagonal 1 | 1 KB | 1 | 300s | 8.8 ms | 1.0 / s | 0 / 301 | 1m | 89 MB | No | Clean run |
+| 2026-06-16T00:18:38Z | Diagonal 2 | 100 KB | 10 | 300s | 46.0 ms | 9.8 / s | 0 / 2930 | 30m | 179 MB | No | Clean run |
+| 2026-06-16T00:24:40Z | Diagonal 3 | 1 MB | 100 | 300s | 637.0 ms | 53.7 / s | 0 / 16107 | 552m | 470 MB | No | Slight backpressure, but successful — engine-side cap on full pipeline |
+| 2026-06-16T00:30:46Z | Diagonal 4 | 5 MB | 500 | N/A | N/A | N/A | N/A | N/A | N/A | Sandbox OOM | JVM `OutOfMemoryError` in `LoadTestService.buildCell` **before** any traffic — a sandbox load-generator limit, **not** an engine OOM |
+| 2026-06-16T01:41:11Z | Cell 11 | 1 MB | 100 | 180s | 905.4 ms | 53.6 / s | 0 / 9652 | 589m | 731 MB (host JVM) | No | 0 failures; achieved 53.6/s < offered 100/s because the SDK's in-flight window throttled the producer (the engine never rejected) |
 
-Engine CPU/Mem/RocksDB/flush-latency columns are populated from Grafana Cloud queries (see §2) once the corresponding cells have been re-run against the fixed Nessie. Scenarios 1 and 2 are clean baseline; 3 and 4 need re-execution before they constitute real sizing data.
+These are the current authoritative numbers (the 2026-06-16 diagonal + Cell 11). The headline sizing result: **1 MB × 100 ev/s sustains ~53.6 MB/s at a ~470 MB peak engine working set under the 512 MiB limit, zero OOMKills.** "Peak Mem" is the engine sidecar except where annotated as host JVM. Engine CPU/Mem columns come from the Grafana Cloud queries in §2.
 
 **Peak CPU** = `max_over_time(rate(container_cpu_usage_seconds_total{container="micewriter-engine"}[1m])[15m:])`.  
 **Peak Mem** = `max_over_time(container_memory_working_set_bytes{container="micewriter-engine"}[15m:])`.  
-**Flush latency** = wall-clock between `rotating column family` and `Table flushed` in the engine logs (Loki query in §2).
+**Flush latency** = wall-clock between `Column family rotated` and `Iceberg commit successful` in the engine logs (Loki query in §2).
 
 ---
 
@@ -273,7 +275,7 @@ engine:
     limits:
       cpu: 500m      # ← set to peak CPU of the highest planned load scenario + 20% headroom
       memory: 512Mi  # ← set to peak memory + 20% headroom; must never OOMKill in normal use
-  rocksdbStorageSize: "10Gi"  # ← set to (peak RocksDB usage × flush_interval_secs / 600) × 2
+  rocksdbStorageSize: "10Gi"  # ← set to (peak RocksDB usage × flush_interval_secs / 300) × 2
 ```
 
 The `requests` value determines scheduling density — a lower request means more engine sidecars can co-locate on a node. The `limits` value is the safety cap.
@@ -292,7 +294,8 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 | Gap | Impact | Suggested fix |
 |---|---|---|
 | Single-replica only | Catalog contention from concurrent commits across many engine sidecars is not exercised | Phase-2 follow-up: scale the sandbox Deployment to 2–3 replicas (lifting the k8s-node-3 nodeSelector) and re-run one or two cells. See [feasibility.md §4](feasibility.md) for what the local setup does and does not measure. |
-| Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, JSON decode latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and inject the corresponding scrape annotations via the k8s-injector webhook. |
+| Scrape annotations are not auto-injected | The engine **does** expose Prometheus metrics on `:8088/metrics` (see [observability.md](observability.md)), but the k8s-injector does **not** add scrape annotations — each adopting app must put `k8s.grafana.com/scrape` + `metrics.portNumber: "8088"` (pinned to the `micewriter-engine` container) on its own pod template, as the sandbox does. | Future: optionally have the injector add the scrape annotations so engine metrics flow without app-side boilerplate. |
+| Limited internal engine metrics | Only file/byte/commit/IPC counters are exported; finer internals (RocksDB memtable size, JSON decode latency, Parquet compile time) are visible only as log lines | Future: add gauges/histograms for those internals to the existing `/metrics` handler in `micewriter-engine`. |
 
 ---
 

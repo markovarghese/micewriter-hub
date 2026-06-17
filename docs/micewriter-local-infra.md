@@ -31,6 +31,7 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 clean       # Full teardown â
 powershell -ExecutionPolicy Bypass -File .\run.ps1 status      # Show pod status in micewriter-infra namespace
 powershell -ExecutionPolicy Bypass -File .\run.ps1 query-up    # Deploy optional query stack: Trino + Superset
 powershell -ExecutionPolicy Bypass -File .\run.ps1 query-down  # Tear down Trino + Superset
+powershell -ExecutionPolicy Bypass -File .\run.ps1 test        # Run Iceberg CRUD integration tests (via Trino)
 ```
 
 ## ðŸ“¦ Output Artifact

@@ -152,7 +152,7 @@ curl -X POST "http://k8s-node-1.local/events/load?count=1000"
 
 ### Watch the engine flush
 
-The sidecar flushes every ~10 minutes or when 192 MB of data is accumulated. Stream its logs to watch:
+The sidecar flushes every ~5 minutes or when the active column family crosses its rotation threshold (~128 MB). Stream its logs to watch:
 
 ```powershell
 kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine --follow
@@ -160,9 +160,10 @@ kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engin
 
 Look for log lines like:
 ```
-flush_engine: rotating column family, frozen_cf=cf_1
-iceberg_writer: committing snapshot to nessie, files=3, rows=1000
-iceberg_writer: commit succeeded, snapshot_id=...
+Timer triggered flush
+Starting flush cycle
+Column family rotated frozen=cf_1
+Iceberg commit successful table=load_test_events
 ```
 
 ### Confirm data landed

@@ -4,6 +4,8 @@ Based on the architecture of the `micewriter-engine` and `micewriter-sdk`, the s
 
 Here is the formula to calculate the system's average effective throughput ($R_{eff}$) in messages per second.
 
+> The constants used below (`flush_size_bytes`, `MAX_RETAINED_FROZEN_CFS`, etc.) and their defaults are defined once in [System Limits and Backpressure → Engine configuration constants](limits-and-backpressure.md#engine-configuration-constants).
+
 ## 1. Variables
 
 ### Workload Variables
@@ -29,7 +31,7 @@ Before backpressure is applied, the engine buffers data in local RocksDB column 
 
 While there is a hard global bytes limit ($L_{flush} \times (1 + N_{frozen})$ = 384 MB), the code in `uds_server.rs` actually triggers backpressure the moment the number of frozen CFs reaches $N_{frozen}$ (`retained >= max_retained_frozen_cfs`). Because of this, the active CF is not allowed to fill up once $N_{frozen}$ is reached!
 
-Furthermore, rotation sizes are subject to **Jitter** (`flush_size_jitter_bytes` = 8 MB). Each CF rotates at a uniformly random size between 120 MB and 136 MB. Because the true buffer capacity $C_{max}$ is the sum of $N_{frozen}$ random variables, it follows an Irwin-Hall distribution. However, for calculating *average* throughput over a time window, we use the expected value (mean):
+Furthermore, rotation sizes are subject to **Jitter** (`flush_size_jitter_bytes` = 64 MB). Each CF rotates at a uniformly random size between 64 MB and 192 MB (mean 128 MB). Because the true buffer capacity $C_{max}$ is the sum of $N_{frozen}$ random variables, it follows an Irwin-Hall distribution. However, for calculating *average* throughput over a time window, we use the expected value (mean):
 
 $$ E[C_{max}] = L_{flush} \times N_{frozen} $$
 *(With defaults: 128 MB * 2 = 256 MB)*

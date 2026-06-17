@@ -35,7 +35,7 @@ sequenceDiagram
     Engine->>RocksDB: Append Arrow IPC to active Column Family
     Engine-->>SDK: Acknowledge IPC response
 
-    Note over Engine,ObjectStore: Hybrid Flush Cycle (10 Min or 128 MB)
+    Note over Engine,ObjectStore: Hybrid Flush Cycle (~5 Min or 128 MB)
     Engine->>Engine: Jitter timer fires OR size limit reached, rotate RocksDB Column Family
     Engine->>RocksDB: Read frozen Arrow IPC records
     Engine->>Engine: Stream Arrow IPC → Parquet chunks
@@ -57,13 +57,13 @@ All IPC messages use a standard 4-byte big-endian length prefix framing protocol
 - **Schemas:** Handshake messages (`REGISTER_SCHEMA`) are sent as JSON.
 - **Telemetry Records:** Hot-path ingestion records (`INGEST_RECORD`) are sent as native **JSON** bytes from the SDK.
 - **Intake Conversion & Schema Caching:** To prevent disk bottlenecks and memory bloat, the UDS intake path uses a shared pool of `arrow-json` parsers to instantly convert JSON payloads into compact Arrow IPC format *before* writing to RocksDB. The intake writer maintains a per-table Arrow schema cache to avoid rebuilding schemas per-record.
-- **Streaming Parquet Engine:** The background flush cycle reads compact Arrow IPC bytes from RocksDB. Because parsing is already done, it simply streams the IPC records directly into an `AsyncArrowWriter` using `opendal` multipart uploads, bounding memory strictly to the Parquet row group size (~16MiB) instead of buffering full files in memory.
+- **Streaming Parquet Engine:** The background flush cycle reads compact Arrow IPC bytes from RocksDB. Because parsing is already done, it simply streams the IPC records directly into an `AsyncArrowWriter` using `opendal` multipart uploads, bounding memory strictly to the Parquet row group size (8 MiB default, `PARQUET_ROW_GROUP_BYTES`) instead of buffering full files in memory.
 
 ## 3. The Flush Cycle & Graceful Shutdown
 
 To consolidate small records into optimized Iceberg v3 Parquet files while protecting the Catalog API from rate limits (the "Thundering Herd" problem):
 
-- **Hybrid Time/Size Column Family Swap:** The sidecar rotates the active RocksDB Column Family and freezes it for compilation either on a jittered schedule (e.g., 10 minutes ± 2 minutes) OR immediately if the uncompressed data exceeds 128 MB. The 128 MB flush limit optimizes for downstream analytics while keeping the sidecar under the 512 MiB container limit.
+- **Hybrid Time/Size Column Family Swap:** The sidecar rotates the active RocksDB Column Family and freezes it for compilation either on a jittered schedule (5 minutes ± 1 minute) OR when the active CF crosses its randomized rotation threshold (64–192 MB, mean 128 MB). See the [engine configuration constants](limits-and-backpressure.md#engine-configuration-constants) for the exact defaults. This keeps the sidecar under the 512 MiB container limit while still producing analytics-friendly file sizes.
 - **Compilation:** The frozen Arrow IPC records are dynamically cast using the Iceberg schema and streamed into Parquet files. Note: The engine performs fast, append-only operations; Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs.
 - **Catalog Commit:** The sidecar uploads files to S3 (MinIO or AWS S3) and executes an atomic commit to the configured catalog (Nessie or AWS Glue). On `CommitFailedException` (optimistic locking failure), it uses an exponential backoff retry.
 - **SIGTERM Emergency Flush:** If Kubernetes initiates pod termination, the sidecar intercepts the `SIGTERM` signal, pauses new ingestion, forces an immediate compilation/commit of remaining RocksDB data, and exits safely.
@@ -77,7 +77,7 @@ To consolidate small records into optimized Iceberg v3 Parquet files while prote
 This architecture intentionally abstracts away **read-after-write** capabilities from the emitting Spring Boot application. The system is fundamentally split into two optimized domains:
 
 1. **Write Optimization:** The application achieves microsecond write latency via UDS and local RocksDB caching, completely insulated from cloud API latency.
-2. **Read Optimization:** Distributed query engines (e.g., **Trino, Apache Superset, Athena, Spark**) require large, columnar files to execute analytical queries efficiently. By delaying the Iceberg catalog commit until the sidecar has compiled ~10 minutes (or 128 MB) worth of telemetry into larger Parquet files, downstream analytics platforms are saved from the catastrophic performance degradation of scanning millions of tiny S3 files.
+2. **Read Optimization:** Distributed query engines (e.g., **Trino, Apache Superset, Athena, Spark**) require large, columnar files to execute analytical queries efficiently. By delaying the Iceberg catalog commit until the sidecar has compiled ~5 minutes (or ~128 MB) worth of telemetry into larger Parquet files, downstream analytics platforms are saved from the catastrophic performance degradation of scanning millions of tiny S3 files.
 
 ---
 ### 🔗 The mIceWriter Ecosystem

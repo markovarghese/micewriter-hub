@@ -12,16 +12,16 @@ This repository contains the platform/infrastructure core. It is a highly optimi
 - **Async Runtime:** Tokio
 - **IPC Interface:** Tokio Unix Domain Sockets (raw `tokio::net::UnixListener`)
 - **Local Storage:** RocksDB Crate
-- **Iceberg Catalog:** `iceberg-rust` (Native Rust Iceberg client v0.9.1+ with full append support, no Python dependencies required)
+- **Iceberg Catalog:** `iceberg-rust` (Native Rust Iceberg client v0.9 with full append support, no Python dependencies required)
 - **S3 Storage:** `OpenDalStorageFactory` (via `iceberg-storage-opendal`) to seamlessly support `s3://` protocol.
 
 ## ⚙️ Functionality
 The Sidecar Engine is injected automatically into business application pods. Its primary responsibilities include:
 
 1. **UDS Listener:** It spins up a raw Tokio `UnixListener` on the shared `/var/run/app/iceberg.sock` and instantly writes incoming telemetry payloads into RocksDB, returning microsecond acknowledgments.
-2. **Jittered Cron Loop:** A background Tokio task wakes up every ~10 minutes (with intentional jitter to desynchronize across pods) to stream frozen RocksDB records (Arrow IPC bytes) into Parquet files, and execute catalog commits with exponential backoff.
+2. **Jittered Cron Loop:** A background Tokio task wakes up every ~5 minutes (with intentional jitter to desynchronize across pods) to stream frozen RocksDB records (Arrow IPC bytes) into Parquet files, and execute catalog commits with exponential backoff. (All flush/sizing defaults: [engine configuration constants](limits-and-backpressure.md#engine-configuration-constants).)
    * **Dynamic Hardware-Aware Scaling:** The engine reads injected pod memory limits and automatically sizes pipeline queue depths, UDS ingest channels, and `RocksDB` buffers to maintain memory safety on constrained nodes.
-   * **Streaming Parquet:** Instead of buffering full files in memory, the engine streams data directly into MinIO/S3 using `opendal` multipart uploads and 16MiB Parquet row groups, bounding memory tightly.
+   * **Streaming Parquet:** Instead of buffering full files in memory, the engine streams data directly into MinIO/S3 using `opendal` multipart uploads and 8 MiB Parquet row groups (`PARQUET_ROW_GROUP_BYTES`), bounding memory tightly. The output file roll target is `TARGET_PARQUET_BYTES` (default 64 MiB; set to `128Mi` for Trino-optimized files).
    * **Append-Only Reality:** The engine performs fast, append-only operations (via Iceberg's `FastAppendAction`). Puffin deletion vectors and row-level updates are deferred to asynchronous Iceberg maintenance jobs outside of this sidecar.
    * **End-to-End Testing:** The engine accepts manual flush requests via the IPC socket by default natively (`ENABLE_MANUAL_FLUSH=true`). **CAUTION:** In production environments, you must explicitly disable this via pod annotations to remain protected from Catalog API abuse.
 3. **Size-Threshold Flushes:** Alongside the timer, the engine also tracks the physical byte size of the active RocksDB column family. When this size exceeds the configured `FLUSH_SIZE_BYTES` threshold (with random jitter), an IPC flush signal is generated internally. 
@@ -48,7 +48,7 @@ With Direct I/O enabled, the engine's memory footprint is strictly bounded to it
 Even with Direct I/O, early streaming pipelines could OOM under `conc=2` (two concurrent flush streams) due to excessive channel read-ahead buffering large multi-megabyte payloads in memory before the S3 upload could clear them.
 
 **Resolution:**
-The engine pipeline channels are double-buffered (queue depth capped at 2) and the UDS ingest channel is constrained (depth 8) to strictly bound the amount of in-flight bytes. Furthermore, RocksDB SST compression was disabled and replaced with hardware CRC32C, eliminating wasteful memory and CPU overhead on random telemetry payloads. The engine safely rides under the 512Mi limit using ~400Mi working set even at 74 MB/s sustained ingestion.
+The engine pipeline channels are double-buffered (queue depth capped at 2) and the UDS ingest channel is constrained (depth 8) to strictly bound the amount of in-flight bytes. Furthermore, RocksDB SST compression is disabled (`DBCompressionType::None`) — block checksums use hardware CRC32C where the CPU exposes it — eliminating wasteful CPU overhead on incompressible random telemetry payloads. In the 2026-06-16 load test (1 MB payloads at 100 ev/s offered), the engine safely rode under the 512Mi limit at a ~470 MB peak working set while sustaining **~53.6 MB/s**.
 
 ## 📦 Output Artifact
 A minimal Linux Docker Image (~20MB-50MB) tagged and pushed to the internal container registry.

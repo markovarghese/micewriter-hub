@@ -31,15 +31,18 @@ The SDK maintains two active release lines depending on your infrastructure:
 
 This library abstracts away the IPC complexity so business developers just write standard Java code.
 
-1. **Annotations:** Provides `@IcebergEntity` and `@IcebergId` to demarcate domain objects (POJOs) that should be ingested. These are in the `core` module and are framework-agnostic.
+1. **Annotations:** Provides `@IcebergEntity` and `@IcebergId` to demarcate domain objects (POJOs) that should be ingested. These live in the `api` module (package `com.micewriter.sdk.annotation`) so they can be depended on from shared domain libraries without pulling in the transport.
 
 2. **Schema registration:** On startup, `SchemaRegistrar` sends one `REGISTER_SCHEMA` (0x01) JSON message per `@IcebergEntity` class, telling the engine to prepare the Iceberg table.
    - *Spring Boot*: scans the classpath automatically via `SpringSchemaRegistrar` on `ContextRefreshedEvent`; bounded by `micewriter.base-package`.
    - *Dropwizard*: entity classes are declared explicitly via `MicewriterBundle.entities(...)` because Dropwizard provides no classpath scanner.
 
-3. **`IcebergStreamTemplate`:** The primary ingest API, with two send modes that both serialize the POJO to **JSON** streamed straight into the `INGEST_RECORD` (0x02) frame:
-   - **`.send(pojo)`** — *blocking*. Waits for the engine ACK before returning, so a single calling thread keeps only one record in flight. Simple, but latency-bound: for 1 MB payloads a single thread tops out at **~100 records/s** regardless of the offered rate.
-   - **`.sendAsync(pojo)`** — *pipelined*. Returns a `CompletableFuture<Void>` and keeps many frames in flight (ACK ordering preserved by a FIFO queue), lifting the single-caller ceiling well past the synchronous limit (**measured ~5×** for 1 MB payloads). Host memory is bounded by a configurable **in-flight byte budget** (`max-in-flight-bytes`, default **8 MiB**): the caller blocks only when the window is full — which is also how the SDK applies *client-side* backpressure. Errors (timeout, channel drop, engine rejection) complete the future exceptionally rather than throwing on the caller. See [System Limits and Backpressure](limits-and-backpressure.md).
+3. **`IcebergStreamTemplate`:** The primary ingest API. All send modes serialize the POJO to **JSON** streamed straight into the `INGEST_RECORD` (0x02) frame:
+   - **`.sendAsync(pojo)`** — *pipelined, recommended*. Returns a `CompletableFuture<Void>` and keeps many frames in flight (ACK ordering preserved by a FIFO queue), so it sustains far higher throughput than the blocking path. Host memory is bounded by a configurable **in-flight byte budget** (`max-in-flight-bytes`, default **8 MiB**): the caller blocks only when the window is full — which is also how the SDK applies *client-side* backpressure. Errors (timeout, channel drop, engine rejection) complete the future exceptionally rather than throwing on the caller.
+   - **`.sendAsyncWithRetry(pojo)`** — `sendAsync` plus automatic retry on transient failures; the most resilient data path.
+   - **`.send(pojo)`** — *blocking, `@Deprecated`*. Waits for the engine ACK before returning, so a single calling thread keeps only one record in flight. Simple but latency-bound, and retained only for smoke tests / backward compatibility — prefer the async paths for any real throughput.
+
+   See [System Limits and Backpressure](limits-and-backpressure.md) for the in-flight window and backpressure behaviour.
 
    The template is:
    - A Spring `@Bean` in Spring Boot apps (injected with `@Autowired`).
@@ -82,7 +85,7 @@ Add the starter dependency — it auto-configures everything via `META-INF/sprin
         <dependency>
             <groupId>com.micewriter</groupId>
             <artifactId>micewriter-sdk-bom</artifactId>
-            <version>2.0.0</version> <!-- Use 1.x.x if using the v1 UDS architecture -->
+            <version>1.0.0-SNAPSHOT</version> <!-- v1 UDS line; use 2.x.x for the v2 per-table line -->
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -110,7 +113,7 @@ public class EventService {
     @Autowired IcebergStreamTemplate icebergTemplate;
 
     public void record(TelemetryEvent event) {
-        icebergTemplate.send(event);
+        icebergTemplate.sendAsync(event);   // pipelined; bounded by max-in-flight-bytes
     }
 }
 ```
@@ -136,7 +139,7 @@ Add the bundle dependency — entity classes must be listed explicitly. Again, w
         <dependency>
             <groupId>com.micewriter</groupId>
             <artifactId>micewriter-sdk-bom</artifactId>
-            <version>2.0.0</version> <!-- Use 1.x.x if using the v1 UDS architecture -->
+            <version>1.0.0-SNAPSHOT</version> <!-- v1 UDS line; use 2.x.x for the v2 per-table line -->
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -199,11 +202,12 @@ Five compiled `.jar` files released together at the same version, published to M
 * [Motivation & target adopter](why.md)
 
 **🛠️ What:**
-* [System overview & wire protocol](system-overview.md)
-* [v2: Per-table pipelines](per-table-pipelines.md)
-* [v1 → v2 migration rationale](v1-to-v2-migration.md)
-* [Rust engine internals](micewriter-engine.md)
+* [System overview & IPC protocol](system-overview.md)
+* [System limits & backpressure analysis](limits-and-backpressure.md)
+* [Rust sidecar engine](micewriter-engine.md)
 * [Java SDK](micewriter-sdk-java.md)
+* [Kubernetes injector](micewriter-k8s-injector.md)
+* [Observability & Telemetry](observability.md)
 
 **🔬 Is it viable?**
 * [Feasibility evaluation](feasibility.md)

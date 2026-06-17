@@ -2,6 +2,8 @@
 
 > [!WARNING]
 > **ABANDONED ARCHITECTURE:** This document outlines a *theoretical* architectural upgrade that was formally abandoned. The system currently relies entirely on dynamic JSON multi-threading, which was proven in load testing to easily saturate cluster network limits while remaining perfectly memory-bounded. The complexity of AOT schema compilation is no longer necessary.
+>
+> *Confirmed against the v1 engine source:* there is no `build.rs`, no `phf` perfect-hash registry, and no generated builders — `REGISTER_SCHEMA` payloads are kept in an in-memory map and Arrow/Iceberg schemas are built dynamically at runtime. This page is retained only as a historical design record.
 
 ## 🎯 The Original Goal
 The objective of this architecture was to achieve the "Holy Grail" of sidecar performance: **True Zero-Copy `JSON → Static Arrow Parquet` pipeline**.

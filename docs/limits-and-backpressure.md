@@ -5,6 +5,35 @@ This document explains the limits applied by the `micewriter-sdk` and `micewrite
 > [!NOTE]
 > For a mathematical derivation of how these limits translate into expected system throughput, see the [Effective Throughput Model](throughput-model.md).
 
+## Engine configuration constants
+
+This table is the **canonical source of truth** for the engine's tunables. Every value below is read in `micewriter-engine`'s `config.rs` (or is a compile-time constant). Other documents in this hub link here rather than restating these numbers — if the code changes, update this table and nothing else needs to follow.
+
+| Constant | Env var | Default | Meaning |
+|---|---|---|---|
+| Flush interval | `FLUSH_INTERVAL_SECS` | **300 s (5 min)** | Base period of the jittered background flush timer |
+| Flush jitter | `FLUSH_JITTER_SECS` | **±60 s (±1 min)** | Desynchronizes pods → effective interval 240–360 s |
+| CF rotation size | `FLUSH_SIZE_BYTES` | **128 MB** | Active column family rotates (freezes) at this size |
+| Rotation size jitter | `FLUSH_SIZE_JITTER_BYTES` | **64 MB** | Rotation fires at a uniform-random 64–192 MB (mean 128 MB) |
+| Per-message cap | `MAX_PAYLOAD_SIZE` | **16 MB** | Max single IPC frame; also the write-batch byte cap |
+| Write batch max | *(const)* | **1 000 records** | Records coalesced per RocksDB write batch |
+| Retained frozen CFs | `MAX_RETAINED_FROZEN_CFS` | **2** | Backpressure once this many frozen CFs await flush |
+| Hard unflushed limit | *derived* | **384 MB** | `FLUSH_SIZE_BYTES × (1 + MAX_RETAINED_FROZEN_CFS)`; effective backpressure ≈ 256 MB |
+| UDS ingest channel depth | *(const)* | **8** | Bounds in-flight intake bytes |
+| Flush pipeline queue depth | *(const)* | **2** | Double-buffered flush pipeline channels |
+| Parquet row-group bytes | `PARQUET_ROW_GROUP_BYTES` | **8 MiB** | Row groups roll at this size; rows-per-group derived per-table from average record size |
+| Target Parquet file size | `TARGET_PARQUET_BYTES` | **64 MiB** | Output file roll target (set to `128Mi` for Trino-optimized files) |
+| Parquet compression | `PARQUET_COMPRESSION` | **SNAPPY** | `NONE` \| `SNAPPY` \| `ZSTD` |
+| Manual flush | `ENABLE_MANUAL_FLUSH` | **true** | Exposes the `FLUSH_NOW` IPC command (disable in production) |
+| RocksDB fsync | `ROCKSDB_SYNC_WRITES` | **true** | fsync each write batch before ACK |
+| Socket path | `SOCKET_PATH` | `/var/run/app/iceberg.sock` | Shared UDS path |
+| RocksDB path | `ROCKSDB_PATH` | `/var/lib/rocksdb` | RocksDB data directory (ephemeral PVC) |
+| Catalog | `CATALOG_TYPE` | `nessie` | `nessie` (Iceberg REST) or `glue` |
+| Warehouse | `WAREHOUSE` (fallback `NESSIE_WAREHOUSE`) | `s3://iceberg` | Iceberg warehouse prefix |
+| Memory limit | `ENGINE_MEM_LIMIT_BYTES` | 512 MiB | Drives dynamic sizing of batches/buffers/concurrency |
+
+RocksDB additionally runs with **Direct I/O** (`set_use_direct_reads` + `set_use_direct_io_for_flush_and_compaction`) and **SST compression disabled** (`DBCompressionType::None`); block checksums use hardware CRC32C where the CPU exposes it.
+
 ## 1. Intentional Limits
 
 ### SDK & IPC Payload Limit (16 MB)
@@ -25,7 +54,7 @@ This maximizes RocksDB throughput while preventing OOM crashes on bursts of larg
 To prevent out-of-memory (OOM) crashes from excessive read-ahead buffering:
 * **UDS Ingest Channel**: Capped at depth **8**. With large ~2.4MB JSON frames, this strictly bounds the intake memory.
 * **Pipeline Queue Depth**: The flush pipeline channels are double-buffered (depth **2**) to prevent memory exhaustion when reading from RocksDB faster than S3 can upload.
-* **Parquet Row Groups**: Instead of accumulating full files in memory, the streaming engine rolls Parquet row groups at **16MiB** (`max_row_group_rows=15`), allowing garbage collection of Arrow arrays while the multipart upload streams.
+* **Parquet Row Groups**: Instead of accumulating full files in memory, the streaming engine rolls Parquet row groups at **8 MiB** (`PARQUET_ROW_GROUP_BYTES`; the rows-per-group count is derived per-table from the average record size, not a fixed constant), allowing garbage collection of Arrow arrays while the multipart upload streams.
 
 ### Flush Intervals
 Data is normally flushed based on a jittered cron loop to prevent all microservices from hitting the S3/Nessie catalog simultaneously.
@@ -37,9 +66,9 @@ Data is normally flushed based on a jittered cron loop to prevent all microservi
 
 The Engine buffers incoming IPC messages in a durable local RocksDB "active" Column Family. To prevent this buffer from growing indefinitely between periodic flushes, the engine defines a size limit:
 * **`flush_size_bytes`**: Default **128 MB**.
-* **`flush_size_jitter_bytes`**: Default **8 MB**.
+* **`flush_size_jitter_bytes`**: Default **64 MB**.
 
-When the active CF size exceeds a randomized threshold between **120 MB** and **136 MB** (jitter), the engine rotates the CF (freezing it) and immediately triggers an asynchronous flush. 
+When the active CF size exceeds a randomized threshold between **64 MB** and **192 MB** (jitter, mean 128 MB), the engine rotates the CF (freezing it) and immediately triggers an asynchronous flush. 
 
 To protect the Engine's memory without unnecessarily throttling the host application, the engine enforces two global backpressure limits:
 * **Retained CF Count**: Reject traffic if the number of frozen CFs pending flush reaches `MAX_RETAINED_FROZEN_CFS` (default 2).
@@ -59,9 +88,9 @@ To understand the impact of the limits and the backpressure bug, let's explore t
 
 * **Throughput**: 10 KB / sec (0.6 MB / minute).
 * **Payload Limit**: 1 KB is well under the 16 MB limit.
-* **Rotation**: In 5 minutes, the active CF accumulates ~3 MB of data. This is far below the 24–40 MB rotation limit, so size-based rotation never triggers.
+* **Rotation**: In 5 minutes, the active CF accumulates ~3 MB of data. This is far below the 64–192 MB rotation threshold, so size-based rotation never triggers.
 * **Flush Phase**: The periodic timer wakes up every ~4–6 minutes, rotates the 3 MB active CF, and compiles it. The compile batch limits process records in dynamically sized batches, keeping memory safely bounded.
-* **Backpressure**: During the flush, `total_unflushed_bytes` is 3 MB (frozen) + 0 MB (new active). This is well below the 288 MB backpressure limit. 
+* **Backpressure**: During the flush, `total_unflushed_bytes` is 3 MB (frozen) + 0 MB (new active). This is well below the 384 MB backpressure limit. 
 * **Result**: The system runs flawlessly, efficiently batching events and committing them to Iceberg without ever applying backpressure to the host app.
 
 ```mermaid
@@ -77,10 +106,10 @@ sequenceDiagram
     UDS->>ActiveCF: Append (Total unflushed under 128 MB)
     ActiveCF-->>UDS: OK
     UDS-->>SDK: AckResponse::ok()
-    Note over ActiveCF,Flush: In 10 mins, Active CF reaches 6 MB
-    Flush->>ActiveCF: Periodic 10 min Timer Fires
+    Note over ActiveCF,Flush: In ~5 mins, Active CF reaches ~3 MB
+    Flush->>ActiveCF: Periodic ~5 min Timer Fires
     Flush->>ActiveCF: Rotate Active CF -> Frozen CF
-    Note over ActiveCF,Flush: Total unflushed = 6 MB. No backpressure.
+    Note over ActiveCF,Flush: Total unflushed = ~3 MB. No backpressure.
     Flush->>Iceberg: Compile and Commit Parquet
     Iceberg-->>Flush: Success
     Flush->>ActiveCF: Drop Frozen CF
@@ -150,7 +179,7 @@ The injector mounts RocksDB on a **generic ephemeral volume** (`micewriter-k8s-i
 - It survives a **container** restart (which is why crash recovery works) but is **destroyed on pod reschedule**.
 - On the one failure fsync guards against (node power loss / kernel panic), the pod is recreated — typically with a fresh ephemeral PVC and/or on another node — so the **entire buffered RocksDB dataset is lost regardless of fsync**.
 
-Net: in this topology fsync-on protects only the razor-thin case of "power loss but the exact same pod resumes in place on the same node," while costing **~1.5× write throughput** (load-tested, 1 MB payloads: ~235 MB/s with fsync on vs ~347 MB/s with it off — and even fsync-off is then capped by the single-writer/depth-4-channel serialization, not fsync). Whether that trade earns the default is tracked in [`markovarghese/micewriter-engine#2`](https://github.com/markovarghese/micewriter-engine/issues/2).
+Net: in this topology fsync-on protects only the razor-thin case of "power loss but the exact same pod resumes in place on the same node," while costing roughly **~1.5× write throughput** on the RocksDB write path (and even with fsync off, the write path is then capped by the single-writer serialization, not by fsync). Whether that trade earns the default is tracked in [`markovarghese/micewriter-engine#2`](https://github.com/markovarghese/micewriter-engine/issues/2).
 
 ### If stronger durability is required
 Toggling fsync is the wrong lever in this topology. The effective options are: (a) **shorten the flush interval** to shrink the at-risk window; (b) put RocksDB on a **node-persistent** volume + node affinity so the buffer survives reschedule — *then* fsync genuinely matters; or (c) add **app-side at-least-once** with replay above the SDK.

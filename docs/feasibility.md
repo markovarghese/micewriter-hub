@@ -79,7 +79,7 @@ Both of these become relevant at production scale and require a separate evaluat
 
 ## 5. What "viable" looks like
 
-Recent streaming architecture improvements have proven that producing 128 MiB Trino-optimized Parquet files is fully viable within a 512 MiB sidecar at `conc=2` concurrency, supporting ingestion rates up to 74 MB/s.
+The streaming flush architecture lets the sidecar produce analytics-friendly Parquet files within its 512 MiB limit. In the 2026-06-16 diagonal sweep, a 1 MB × 100 ev/s workload (the most demanding cell that completed) sustained **~53.6 MB/s** at a **~470 MB peak engine working set** under the 512 MiB limit with **zero OOMKills**; lower-stress cells (1 KB × 1/s → 89 MB, 100 KB × 10/s → 179 MB) stayed far lower. (The largest cell — 5 MB × 500/s — did not exercise the engine at all: the *sandbox* JVM hit a heap `OutOfMemoryError` building its payload templates before any traffic was sent.) Producing 128 MiB Trino-optimized files is a configuration choice (`TARGET_PARQUET_BYTES=128Mi`; the default is 64 MiB).
 
 The evaluation produces a row-per-scenario results table in [load-testing-spec.md §6](load-testing-spec.md) with peak CPU, peak memory, RocksDB usage, and flush latency for each `(payload_size × rate × duration)` combination.
 
