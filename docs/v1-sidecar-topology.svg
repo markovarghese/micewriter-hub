@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1320 660" font-family="'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="mIceWriter v1 production deployment shape on AWS EKS. Each application pod (Replica 1, 2, through N) runs an application container that writes over a Unix domain socket to its own engine sidecar; each sidecar buffers in its own RocksDB PVC and independently performs S3 PUT plus Glue commit to AWS S3 and the Glue catalog. There is no fan-in: the engine fleet's throughput is the sum of each sidecar's throughput.">
+  <defs>
+    <marker id="aSlate" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#64748b"/></marker>
+    <marker id="aSky" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#38bdf8"/></marker>
+    <marker id="aTeal" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#2dd4bf"/></marker>
+    <marker id="aIndigo" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 Z" fill="#818cf8"/></marker>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f172a"/><stop offset="1" stop-color="#0b1322"/></linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1320" height="660" fill="#0f172a"/>
+  <rect x="0" y="0" width="1320" height="660" fill="url(#bgGrad)"/>
+
+  <!-- title -->
+  <text x="40" y="42" fill="#e2e8f0" font-size="22" font-weight="700">mIceWriter &#8212; v1 Production Deployment Shape</text>
+  <text x="41" y="64" fill="#94a3b8" font-size="13">Per-pod sidecar &#183; one engine + RocksDB PVC per app pod &#183; <tspan fill="#fca5a5">no fan-in</tspan></text>
+
+  <!-- legend -->
+  <g font-size="11" fill="#94a3b8">
+    <circle cx="980" cy="36" r="4.5" fill="#7dd3fc"/><text x="992" y="40">record over UDS</text>
+    <circle cx="1110" cy="36" r="4.5" fill="#5eead4"/><text x="1122" y="40">S3 PUT + Glue commit</text>
+  </g>
+
+  <!-- ============ EKS cluster ============ -->
+  <rect x="28" y="96" width="900" height="512" rx="16" fill="#101d33" stroke="#475569" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="46" y="122" fill="#cbd5e1" font-size="14" font-weight="600">AWS EKS Cluster</text>
+
+  <!-- ============ commit edges (under pods) ============ -->
+  <path d="M570,179 C760,179 820,300 1000,330" fill="none" stroke="#1f6e63" stroke-width="2" marker-end="url(#aTeal)"/>
+  <path d="M570,343 C760,343 850,355 1000,360" fill="none" stroke="#1f6e63" stroke-width="2" marker-end="url(#aTeal)"/>
+  <path d="M570,507 C760,507 820,420 1000,392" fill="none" stroke="#1f6e63" stroke-width="2" marker-end="url(#aTeal)"/>
+  <text x="812" y="300" fill="#5eead4" font-size="11" text-anchor="middle">S3 PUT + Glue commit</text>
+  <text x="812" y="316" fill="#5b7d76" font-size="9.5" text-anchor="middle">independent per pod</text>
+
+  <!-- ============ Pod template ============ -->
+  <!-- Pod 1 -->
+  <g>
+    <rect x="44" y="126" width="820" height="140" rx="12" fill="#15202f" stroke="#334155" stroke-width="1.3"/>
+    <text x="60" y="148" fill="#94a3b8" font-size="11.5" font-weight="600">App Pod (Replica 1)</text>
+    <rect x="70" y="146" width="210" height="66" rx="9" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+    <text x="175" y="176" fill="#e2e8f0" font-size="13" font-weight="600" text-anchor="middle">Application</text>
+    <text x="175" y="194" fill="#94a3b8" font-size="10.5" text-anchor="middle">Container</text>
+    <rect x="360" y="146" width="210" height="66" rx="9" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+    <text x="465" y="176" fill="#e2e8f0" font-size="13" font-weight="600" text-anchor="middle">Engine Sidecar</text>
+    <text x="465" y="194" fill="#94a3b8" font-size="10.5" text-anchor="middle">flush loop</text>
+    <path d="M280,179 L360,179" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#aSky)"/>
+    <text x="320" y="172" fill="#7dd3fc" font-size="10" text-anchor="middle">UDS</text>
+    <path d="M465,212 L465,224" fill="none" stroke="#818cf8" stroke-width="2" marker-end="url(#aIndigo)"/>
+    <!-- RocksDB PVC cylinder -->
+    <ellipse cx="465" cy="252" rx="65" ry="7" fill="#1e1b4b" stroke="#818cf8" stroke-width="1.2"/>
+    <rect x="400" y="226" width="130" height="26" fill="#1e1b4b" stroke="none"/>
+    <line x1="400" y1="226" x2="400" y2="252" stroke="#818cf8" stroke-width="1.2"/>
+    <line x1="530" y1="226" x2="530" y2="252" stroke="#818cf8" stroke-width="1.2"/>
+    <ellipse cx="465" cy="226" rx="65" ry="7" fill="#312e81" stroke="#818cf8" stroke-width="1.2"/>
+    <text x="465" y="246" fill="#c7d2fe" font-size="10.5" font-weight="600" text-anchor="middle">RocksDB PVC</text>
+  </g>
+
+  <!-- Pod 2 -->
+  <g>
+    <rect x="44" y="290" width="820" height="140" rx="12" fill="#15202f" stroke="#334155" stroke-width="1.3"/>
+    <text x="60" y="312" fill="#94a3b8" font-size="11.5" font-weight="600">App Pod (Replica 2)</text>
+    <rect x="70" y="310" width="210" height="66" rx="9" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+    <text x="175" y="340" fill="#e2e8f0" font-size="13" font-weight="600" text-anchor="middle">Application</text>
+    <text x="175" y="358" fill="#94a3b8" font-size="10.5" text-anchor="middle">Container</text>
+    <rect x="360" y="310" width="210" height="66" rx="9" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+    <text x="465" y="340" fill="#e2e8f0" font-size="13" font-weight="600" text-anchor="middle">Engine Sidecar</text>
+    <text x="465" y="358" fill="#94a3b8" font-size="10.5" text-anchor="middle">flush loop</text>
+    <path d="M280,343 L360,343" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#aSky)"/>
+    <text x="320" y="336" fill="#7dd3fc" font-size="10" text-anchor="middle">UDS</text>
+    <path d="M465,376 L465,388" fill="none" stroke="#818cf8" stroke-width="2" marker-end="url(#aIndigo)"/>
+    <ellipse cx="465" cy="416" rx="65" ry="7" fill="#1e1b4b" stroke="#818cf8" stroke-width="1.2"/>
+    <rect x="400" y="390" width="130" height="26" fill="#1e1b4b" stroke="none"/>
+    <line x1="400" y1="390" x2="400" y2="416" stroke="#818cf8" stroke-width="1.2"/>
+    <line x1="530" y1="390" x2="530" y2="416" stroke="#818cf8" stroke-width="1.2"/>
+    <ellipse cx="465" cy="390" rx="65" ry="7" fill="#312e81" stroke="#818cf8" stroke-width="1.2"/>
+    <text x="465" y="410" fill="#c7d2fe" font-size="10.5" font-weight="600" text-anchor="middle">RocksDB PVC</text>
+  </g>
+
+  <!-- ellipsis -->
+  <text x="175" y="452" fill="#64748b" font-size="20" font-weight="700" text-anchor="middle">&#8942;</text>
+  <text x="465" y="452" fill="#64748b" font-size="20" font-weight="700" text-anchor="middle">&#8942;</text>
+
+  <!-- Pod N -->
+  <g>
+    <rect x="44" y="454" width="820" height="140" rx="12" fill="#15202f" stroke="#334155" stroke-width="1.3"/>
+    <text x="60" y="476" fill="#94a3b8" font-size="11.5" font-weight="600">App Pod (Replica N)</text>
+    <rect x="70" y="474" width="210" height="66" rx="9" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+    <text x="175" y="504" fill="#e2e8f0" font-size="13" font-weight="600" text-anchor="middle">Application</text>
+    <text x="175" y="522" fill="#94a3b8" font-size="10.5" text-anchor="middle">Container</text>
+    <rect x="360" y="474" width="210" height="66" rx="9" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+    <text x="465" y="504" fill="#e2e8f0" font-size="13" font-weight="600" text-anchor="middle">Engine Sidecar</text>
+    <text x="465" y="522" fill="#94a3b8" font-size="10.5" text-anchor="middle">flush loop</text>
+    <path d="M280,507 L360,507" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#aSky)"/>
+    <text x="320" y="500" fill="#7dd3fc" font-size="10" text-anchor="middle">UDS</text>
+    <path d="M465,540 L465,552" fill="none" stroke="#818cf8" stroke-width="2" marker-end="url(#aIndigo)"/>
+    <ellipse cx="465" cy="580" rx="65" ry="7" fill="#1e1b4b" stroke="#818cf8" stroke-width="1.2"/>
+    <rect x="400" y="554" width="130" height="26" fill="#1e1b4b" stroke="none"/>
+    <line x1="400" y1="554" x2="400" y2="580" stroke="#818cf8" stroke-width="1.2"/>
+    <line x1="530" y1="554" x2="530" y2="580" stroke="#818cf8" stroke-width="1.2"/>
+    <ellipse cx="465" cy="554" rx="65" ry="7" fill="#312e81" stroke="#818cf8" stroke-width="1.2"/>
+    <text x="465" y="574" fill="#c7d2fe" font-size="10.5" font-weight="600" text-anchor="middle">RocksDB PVC</text>
+  </g>
+
+  <!-- ============ AWS destination ============ -->
+  <ellipse cx="1140" cy="490" rx="140" ry="15" fill="#3a2f12" stroke="#f59e0b" stroke-width="2" filter="url(#glow)">
+    <animate attributeName="stroke-opacity" values="0.6;1;0.6" dur="2.6s" repeatCount="indefinite"/>
+  </ellipse>
+  <rect x="1000" y="270" width="280" height="220" fill="#3a2f12" stroke="none"/>
+  <line x1="1000" y1="270" x2="1000" y2="490" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="1280" y1="270" x2="1280" y2="490" stroke="#f59e0b" stroke-width="2"/>
+  <ellipse cx="1140" cy="270" rx="140" ry="15" fill="#4a3c18" stroke="#f59e0b" stroke-width="2"/>
+  <text x="1140" y="346" fill="#fde68a" font-size="17" font-weight="700" text-anchor="middle">AWS S3</text>
+  <text x="1140" y="372" fill="#fcd34d" font-size="15" font-weight="600" text-anchor="middle">+ Glue Catalog</text>
+  <text x="1140" y="404" fill="#d6b25a" font-size="11" text-anchor="middle">Apache Iceberg tables</text>
+
+  <!-- footnote -->
+  <text x="46" y="632" fill="#64748b" font-size="10.5">No fan-in &#8212; the engine fleet's throughput is the sum of each sidecar's throughput; the table accumulates one snapshot per (pod &#215; flush cycle).</text>
+
+  <!-- ============ animated packets ============ -->
+  <!-- UDS app -> sidecar -->
+  <circle r="4.5" fill="#7dd3fc"><animateMotion dur="1.2s" repeatCount="indefinite" path="M280,179 L360,179"/></circle>
+  <circle r="4.5" fill="#7dd3fc"><animateMotion dur="1.2s" repeatCount="indefinite" path="M280,343 L360,343"/></circle>
+  <circle r="4.5" fill="#7dd3fc"><animateMotion dur="1.2s" repeatCount="indefinite" path="M280,507 L360,507"/></circle>
+  <!-- sidecar -> pvc -->
+  <circle r="3.5" fill="#a5b4fc"><animateMotion dur="1s" repeatCount="indefinite" path="M465,212 L465,224"/></circle>
+  <circle r="3.5" fill="#a5b4fc"><animateMotion dur="1s" repeatCount="indefinite" path="M465,376 L465,388"/></circle>
+  <circle r="3.5" fill="#a5b4fc"><animateMotion dur="1s" repeatCount="indefinite" path="M465,540 L465,552"/></circle>
+  <!-- sidecar -> AWS commit -->
+  <circle r="4.5" fill="#5eead4"><animateMotion dur="2.6s" repeatCount="indefinite" path="M570,179 C760,179 820,300 1000,330"/></circle>
+  <circle r="4.5" fill="#5eead4"><animateMotion dur="2.6s" begin="0.8s" repeatCount="indefinite" path="M570,343 C760,343 850,355 1000,360"/></circle>
+  <circle r="4.5" fill="#5eead4"><animateMotion dur="2.6s" begin="1.6s" repeatCount="indefinite" path="M570,507 C760,507 820,420 1000,392"/></circle>
+</svg>

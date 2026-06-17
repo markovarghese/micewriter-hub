@@ -88,30 +88,9 @@ mIceWriter is deliberately narrow. The following are **out of scope** and applic
 
 In production EKS, a typical adopting application runs as a `Deployment` with N replicas. Each replica pod gets its own engine sidecar instance, its own RocksDB cache, and commits to Glue independently. **There is no fan-in** — the engine fleet's combined throughput is the sum of each sidecar's throughput, and the Iceberg table accumulates one snapshot per (pod × flush cycle).
 
-```mermaid
-graph TD
-    subgraph EKS["AWS EKS Cluster"]
-        subgraph Pod1["App Pod (Replica 1)"]
-            App1["Application Container"] -->|UDS| Engine1["Engine Sidecar"]
-            Engine1 --> Cache1[("RocksDB PVC")]
-        end
-        subgraph Pod2["App Pod (Replica 2)"]
-            App2["Application Container"] -->|UDS| Engine2["Engine Sidecar"]
-            Engine2 --> Cache2[("RocksDB PVC")]
-        end
-        subgraph PodN["App Pod (Replica N)"]
-            AppN["Application Container"] -->|UDS| EngineN["Engine Sidecar"]
-            EngineN --> CacheN[("RocksDB PVC")]
-        end
-    end
+<img src="v1-sidecar-topology.svg" alt="v1 production deployment shape on AWS EKS — each app pod (Replica 1, 2, … N) runs an application container that writes over a Unix domain socket to its own engine sidecar; each sidecar buffers in its own RocksDB PVC and independently performs S3 PUT + Glue commit to AWS S3 and the Glue catalog. No fan-in: fleet throughput is the sum of each sidecar's throughput" width="100%">
 
-    Engine1 -->|S3 PUT + Glue commit| AWS[("AWS S3 + Glue Catalog")]
-    Engine2 -->|S3 PUT + Glue commit| AWS
-    EngineN -->|S3 PUT + Glue commit| AWS
-
-    style EKS fill:#f5f7fa,stroke:#4a5568,stroke-width:1px
-    style AWS fill:#e2e8f0,stroke:#4a5568,stroke-width:1px
-```
+<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to see the independent per-pod commit paths.</sub>
 
 This shape has two consequences:
 
