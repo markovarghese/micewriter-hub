@@ -30,40 +30,9 @@ If you are deciding whether to adopt the sidecar in your own application, start 
 
 In v2 the application writes to **per-table engine pipelines** over gRPC. Each pipeline is independent — its own `Deployment`, `Service`, `HorizontalPodAutoscaler`, and resource budget sized to that table's payload shape.
 
-```mermaid
-graph TD
-    subgraph K8sCluster ["Kubernetes Cluster"]
-        subgraph AppPod ["App Pod"]
-            App["Spring Boot App<br/>(SDK as Maven dep)"]
-        end
+<img src="docs/v2-topology.svg" alt="mIceWriter v2 system topology — a Spring Boot app embeds the SDK and routes each record by @IcebergEntity table over gRPC to one of three independent per-table engine pipelines (engine-telemetry, engine-audit, engine-model-eval), each running HPA-scaled engine pods backed by per-pod RocksDB, all committing Parquet files to a shared Iceberg catalog (Nessie / AWS Glue) and object store (MinIO / AWS S3)" width="100%">
 
-        subgraph Pipelines ["Per-Table Engine Pipelines"]
-            PipeT["engine-telemetry<br/>(Deployment + HPA)"]
-            PipeA["engine-audit<br/>(Deployment + HPA)"]
-            PipeM["engine-model-eval<br/>(Deployment + HPA, large RAM)"]
-        end
-
-        App -->|gRPC :9090| PipeT
-        App -->|gRPC :9090| PipeA
-        App -->|gRPC :9090| PipeM
-    end
-
-    subgraph CloudOrLocal ["Catalog + Object Store"]
-        Catalog[("Apache Nessie / AWS Glue")]
-        ObjectStore[("MinIO / AWS S3")]
-    end
-
-    PipeT --> Catalog
-    PipeT --> ObjectStore
-    PipeA --> Catalog
-    PipeA --> ObjectStore
-    PipeM --> Catalog
-    PipeM --> ObjectStore
-
-    style AppPod fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style Pipelines fill:#e6f0fa,stroke:#4a5568,stroke-width:1px
-    style CloudOrLocal fill:#f5f7fa,stroke:#4a5568,stroke-width:1px
-```
+<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to see records flow through the pipelines. <a href="docs/per-table-pipelines.md">Full v2 design →</a></sub>
 
 ---
 
@@ -73,7 +42,7 @@ The system is broken down into six repositories along separation-of-concerns lin
 
 | Lens | Repository | Description | Stack | Doc |
 |---|---|---|---|---|
-| 🧭 Meta | 🌐 **`micewriter-hub`** *(this repo)* | Architecture, motivation, feasibility eval — introduces all three lenses | Markdown, Mermaid | [README.md](README.md) |
+| 🧭 Meta | 🌐 **`micewriter-hub`** *(this repo)* | Architecture, motivation, feasibility eval — introduces all three lenses | Markdown, animated SVG | [README.md](README.md) |
 | 🛠️ What | 🦀 **`micewriter-engine`** | Memory-safe Rust engine managing RocksDB buffer and Iceberg commits; deployed as one `Deployment` per Iceberg table in v2 | Rust, Tokio, RocksDB, iceberg-rust, Tonic gRPC | [micewriter-engine.md](docs/micewriter-engine.md) |
 | 🛠️ What | ☕ **`micewriter-sdk-java`** | Java SDK (Spring Boot + Dropwizard) with gRPC transport and table-name routing | Java, gRPC, CBOR | [micewriter-sdk-java.md](docs/micewriter-sdk-java.md) |
 | 🔬 Viable? | 🐳 **`micewriter-local-infra`** | Local data-lake stand-in (MinIO + Nessie) on k3s; hosts the per-table pipeline Helm chart | Helm, Kubernetes | [micewriter-local-infra.md](docs/micewriter-local-infra.md) |

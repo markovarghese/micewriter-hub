@@ -11,39 +11,9 @@ This document outlines the core architecture and data flows for the mIceWriter t
 
 v2 replaces the v1 per-pod sidecar with **one engine `Deployment` + `Service` per Iceberg table**. The Java SDK routes each `send(pojo)` to the correct pipeline using the existing `@IcebergEntity(table = "...")` annotation. Pipelines are independent: HPA, resource sizing, and catalog commits are scoped per table.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App as Java App (Spring Boot / Dropwizard)
-    participant SDK as mIceWriter SDK (Java)
-    participant Resolver as Table Resolver
-    participant Pipeline as engine-{table} Service
-    participant RocksDB as Per-pod RocksDB
-    participant Catalog as Nessie / Glue Catalog
-    participant ObjectStore as S3 (MinIO / AWS S3)
+<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.send(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, transpiles CBOR → NDJSON → Arrow → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
 
-    Note over App,SDK: Startup & Registration Phase
-    SDK->>SDK: Scan @IcebergEntity classes
-    SDK->>Resolver: table → endpoint (convention + override map)
-    SDK->>Pipeline: REGISTER_SCHEMA (gRPC unary, bounded retry)
-    Pipeline->>Catalog: Ensure Iceberg table exists
-    Catalog-->>Pipeline: Ready
-
-    Note over App,RocksDB: Hot-Path Ingestion (sub-ms ack)
-    App->>SDK: icebergTemplate.send(pojo)
-    SDK->>SDK: Route by @IcebergEntity.table
-    SDK->>Pipeline: Ingest stream (CBOR bytes over gRPC)
-    Pipeline->>RocksDB: Append to active Column Family
-    Pipeline-->>SDK: ACK
-
-    Note over Pipeline,ObjectStore: Hybrid Flush Cycle (per pod)
-    Pipeline->>Pipeline: Rotate CF on 10 min ± 2 min OR 32 MB
-    Pipeline->>RocksDB: Read frozen CF
-    Pipeline->>Pipeline: Parse CBOR → NDJSON → Arrow → Parquet
-    Pipeline->>ObjectStore: PUT Parquet files
-    Pipeline->>Catalog: FastAppendAction commit (exponential backoff on conflicts)
-    Pipeline->>RocksDB: Purge frozen CF
-```
+<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to watch records move phase by phase.</sub>
 
 A pipeline is a Helm release of the `micewriter-table-pipeline` chart parameterized by `table`, resource budget, replica counts, and flush thresholds. The engine binary is the same across all pipelines but is pinned to one table at startup via `MICEWRITER_TABLE`.
 

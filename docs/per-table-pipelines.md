@@ -11,83 +11,17 @@ This document describes **v2** of the mIceWriter ingestion architecture: **one e
 
 ## 1. Topology
 
-```mermaid
-graph TD
-    subgraph K8sCluster ["Kubernetes Cluster"]
-        subgraph AppPod ["App Pod"]
-            App["Spring Boot App<br/>(SDK as Maven dep)"]
-        end
+<img src="v2-topology.svg" alt="v2 per-table topology — a Spring Boot app routes each record by @IcebergEntity table over gRPC :9090 to engine-telemetry, engine-audit, or engine-model-eval (large RAM); each pipeline runs HPA-scaled engine pods backed by per-pod RocksDB and independently commits to a shared Iceberg catalog (Nessie / AWS Glue) and object store (MinIO / AWS S3)" width="100%">
 
-        subgraph PipeT ["engine-telemetry"]
-            EngineT["Engine pods (HPA)<br/>gRPC :9090"] --> RDBT[("RocksDB")]
-        end
-        subgraph PipeA ["engine-audit"]
-            EngineA["Engine pods (HPA)<br/>gRPC :9090"] --> RDBA[("RocksDB")]
-        end
-        subgraph PipeM ["engine-model-eval"]
-            EngineM["Engine pods (HPA)<br/>large RAM<br/>gRPC :9090"] --> RDBM[("RocksDB")]
-        end
-
-        App -->|gRPC<br/>telemetry_events| EngineT
-        App -->|gRPC<br/>audit_events| EngineA
-        App -->|gRPC<br/>model_eval| EngineM
-    end
-
-    subgraph CloudOrLocal ["Catalog + Object Store"]
-        Catalog[("Nessie / AWS Glue")]
-        S3[("MinIO / AWS S3")]
-    end
-
-    EngineT --> Catalog
-    EngineT --> S3
-    EngineA --> Catalog
-    EngineA --> S3
-    EngineM --> Catalog
-    EngineM --> S3
-
-    style AppPod fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style PipeT fill:#e6f0fa,stroke:#4a5568,stroke-width:1px
-    style PipeA fill:#e6f0fa,stroke:#4a5568,stroke-width:1px
-    style PipeM fill:#e6f0fa,stroke:#4a5568,stroke-width:1px
-```
+<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to see the flow.</sub>
 
 Each pipeline owns exactly one Iceberg table. The engine binary is pinned to a single table at startup via `MICEWRITER_TABLE`; it processes only records destined for that table and commits only to that table. Pipelines are independent — no cross-pipeline coordination, no shared state.
 
 ## 2. End-to-end data flow
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App as Java App
-    participant SDK as mIceWriter SDK
-    participant Resolver as Table Resolver
-    participant Pipeline as engine-{table} Service
-    participant RocksDB as Per-pod RocksDB
-    participant Catalog as Iceberg Catalog
-    participant S3 as Object Store
+<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.send(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, transpiles CBOR → NDJSON → Arrow → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
 
-    Note over App,SDK: Startup
-    SDK->>SDK: Scan @IcebergEntity classes
-    SDK->>Resolver: table → endpoint (convention + override map)
-    SDK->>Pipeline: REGISTER_SCHEMA (gRPC unary, with bounded retry)
-    Pipeline->>Catalog: Ensure Iceberg table exists
-    Catalog-->>Pipeline: Ready
-
-    Note over App,RocksDB: Hot Path (sub-millisecond ack)
-    App->>SDK: icebergTemplate.send(pojo)
-    SDK->>SDK: Route by @IcebergEntity.table
-    SDK->>Pipeline: Ingest stream (CBOR bytes over gRPC)
-    Pipeline->>RocksDB: Append to active CF
-    Pipeline-->>SDK: ACK
-
-    Note over Pipeline,S3: Flush cycle (per pod)
-    Pipeline->>Pipeline: Rotate CF on 10min ± 2min jitter OR 32 MB
-    Pipeline->>RocksDB: Read frozen CF
-    Pipeline->>Pipeline: CBOR → NDJSON → Arrow → Parquet
-    Pipeline->>S3: PUT Parquet files
-    Pipeline->>Catalog: FastAppendAction commit
-    Pipeline->>RocksDB: Drop frozen CF
-```
+<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to watch records move phase by phase.</sub>
 
 ## 3. Wire protocol
 
