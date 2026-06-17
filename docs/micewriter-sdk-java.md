@@ -21,7 +21,9 @@ The SDK maintains two active release lines depending on your infrastructure. The
 - **`2.x.x` (main branch)**: **gRPC over HTTP/2** for central per-table pipelines; serializes records as **CBOR** (Jackson `CBORFactory`).
 - **`1.x.x` (v1 branch)**: **Unix Domain Sockets (UDS)** for per-pod sidecars; serializes records as **JSON** (Jackson `ObjectMapper`). The v1 line keeps JSON on the wire to stay lean on host CPU.
 
-The sections below describe the **v1 (UDS) SDK**; v2 differences are called out inline.
+The sections below describe the **v1 (UDS) SDK**; v2 differences are called out inline. The v2 publish path has its own section: [v2 Transport: gRPC + CBOR](#-v2-transport-grpc--cbor-design).
+
+> ⚠️ **v2 implementation status (as of 2026-06-17).** The `2.x` transport described here — the gRPC `Ingest` / `RegisterSchema` RPCs and CBOR record serialization — is the **target design**, not yet the shipped code. The current `main`-branch SDK still uses the **v1 UDS + JSON** transport: `UdsConnection` over Netty Epoll, Jackson `ObjectMapper`, and the `INGEST_RECORD 0x02` framing in the [Wire Protocol](#-wire-protocol) section. There is no gRPC client, no `.proto`, and no CBOR dependency wired in (`micewriter-sdk-java-core/pom.xml` carries an empty `<!-- CBOR ... -->` placeholder). The only v2-era change landed so far is **async pipelining over the existing UDS path** (`sendAsyncWithRetry`, §⚙️.3). Confirm the gRPC/CBOR cutover has actually merged before depending on it.
 
 ## 🛠️ Core Technology Stack
 - **Language:** Java 17
@@ -64,6 +66,43 @@ Every message over the UDS has this layout:
 | `INGEST_RECORD` | `0x02` | `[table_name_len u16][table_name UTF-8][JSON bytes]` |
 | `FLUSH_NOW`       | `0x03` | `[Empty Payload]` |
 | ACK (engine → SDK) | — | JSON `{ status: "ok"\|"error", msg? }` |
+
+## 🚀 v2 Transport: gRPC + CBOR (design)
+
+> The Wire Protocol above is **v1 (UDS)**. v2 keeps the same SDK surface — `@IcebergEntity`, `@IcebergId`, and `IcebergStreamTemplate.sendAsyncWithRetry(pojo)` — but changes how records leave the JVM. This section is **design-level**; see the [implementation-status note](#-branches-and-versioning) above for what is actually shipped. Full architecture: [system-overview.md §2](system-overview.md) and [per-table-pipelines.md §2–4](per-table-pipelines.md).
+
+In v2 there is no per-pod sidecar and no Unix domain socket. The SDK **routes each record by `@IcebergEntity.table` to a per-table engine pipeline and publishes over gRPC (HTTP/2)**.
+
+### Channels & routing
+- The table name resolves to a pipeline endpoint via the `MICEWRITER_RESOLVER` template (default `engine-{table}.micewriter.svc:9090`), with a `MICEWRITER_RESOLVER_OVERRIDES` map for tables that don't fit the convention (legacy hyphenated names, cross-namespace pipelines).
+- A `ManagedChannel` is **lazy-created per resolved endpoint and cached** for the SDK's lifetime. gRPC's native keepalive and reconnect replace the v1 `UdsConnection.ensureConnected()` reconnect logic — there is no app-side socket lifecycle to manage.
+
+### RPCs
+| RPC | Direction | Payload | Notes |
+|---|---|---|---|
+| `RegisterSchema` | SDK → Pipeline | JSON `{ table, namespace, fields }` | Unary; called once per `@IcebergEntity` class at startup; bounded retry on an unreachable pipeline. |
+| `Ingest` | SDK → Pipeline | Streaming **CBOR** records | Bidi streaming over the long-lived channel; ACK per record (replaces the UDS `INGEST_RECORD 0x02` message). |
+| `FlushNow` | SDK → Pipeline | Empty | Unary; honored only when `ENABLE_MANUAL_FLUSH=true` (non-production). |
+
+### Serialization
+- **Records (`Ingest`)** — the POJO is serialized to **CBOR** via Jackson `CBORFactory`, replacing v1's `ObjectMapper` JSON. The application-layer payload keeps the **same per-record shape** as v1; only the body encoding changes: `[u16 table_name_len][table_name UTF-8][CBOR bytes]`. gRPC supplies the message framing that v1's `[4-byte length]` prefix provided. Records are **opaque CBOR carried inside the gRPC stream** — they are *not* modeled as protobuf messages, so adopters never regenerate a proto when their POJOs change.
+- **Schemas (`RegisterSchema`)** stay **JSON** — schema registration is off the hot path, so the lighter-weight CBOR is unnecessary there.
+- **Payload cap** — 16 MB per record at both SDK and engine. (A 16 MB monolithic CBOR float array can expand into 200+ MB of `serde_json::Value` DOM in the engine's `arrow-json` parse step.) See [system-overview.md §2.3](system-overview.md).
+
+### Config (v2)
+There is no `socket-path` in v2 — the per-pod sidecar and its UDS are gone, and the v1 `micewriter-k8s-injector` admission webhook is sunset. Apps point at the resolver instead:
+
+```yaml
+# application.yml (Spring) / config.yml (Dropwizard)
+micewriter:
+  resolver: "engine-{table}.micewriter.svc:9090"
+  resolverOverrides:
+    legacy-orders-v1: "engine-legacy-orders.legacy.svc:9090"
+    cross-ns-events:  "engine-events.shared-data.svc:9090"
+  enabled: true
+```
+
+The `@IcebergEntity` / `@IcebergId` annotations and the `sendAsyncWithRetry` call site are **unchanged from v1** — migrating an app is a config + dependency-version change, not a code change.
 
 ## 🏗️ Spring Boot Usage
 
