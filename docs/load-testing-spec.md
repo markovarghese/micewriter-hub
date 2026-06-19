@@ -42,11 +42,23 @@ The metrics that feed the sizing decision are **engine CPU** and **engine memory
 
 ## 3. Test Matrix
 
+### 3.1 The TelemetryEvent Schema
+
+The `micewriter-sandbox` generates synthetic `TelemetryEvent` POJOs to mimic real machine learning inference telemetry. The Iceberg table schema (`load_test_events`) consists of 25 columns:
+
+- **Metadata**: `event_uuid` (string, Iceberg ID), `published_timestamp` (timestamp), `ml_service_name` (string), `ml_service_version` (string)
+- **Vectors**: 8 `List<Double>` array fields (`double_field_1` through `8`)
+- **Features**: 4 `List<Integer>` array fields, 10 `List<String>` array fields
+
+To achieve the targeted **Event Size** during the sweep, the sandbox distributes the requested byte size uniformly across all 22 array fields. This forces the Parquet encoder to maintain 22 large in-memory columnar buffers simultaneously before flushing a row group, heavily exercising its memory footprint and metadata overhead. This provides an extremely rigorous, worst-case benchmark for realistic ML tensor ingestion.
+
+### 3.2 Test Variables
+
 The independent variables and their levels:
 
 | Variable | Levels |
 |---|---|
-| **Event size** (size of `payload` field) | 1 KB · 100 KB · 1 MB · 10 MB |
+| **Event size** (target size of `double_field_1` array) | 1 KB · 100 KB · 1 MB · 10 MB |
 | **Event rate** | 1 · 10 · 100 · 500 events/sec |
 | **Duration** | 5 min (ensures total sweep data stays under the 100 GB MinIO disk cap) |
 
@@ -140,7 +152,7 @@ curl -X POST http://k8s-node-1.local/loadtest/start `
 > [!TIP]
 > **Automated Execution**: You do not need to run this manually! Use the AI skill located at [`skills/run-load-test-sweep.md`](../skills/run-load-test-sweep.md). Simply ask an AI agent connected to the Grafana MCP server to "Use your skill to run the load test sweep", and it will handle execution, monitoring, and populating the results automatically.
 
-Walk the 13 non-skip cells of the §3 matrix in one go, with a 60-second rest between cells so RocksDB can drain:
+Walk the 13 non-skip cells of the §3.2 matrix in one go, with a 60-second rest between cells so RocksDB can drain:
 
 ```powershell
 curl -X POST http://k8s-node-1.local/loadtest/sweep `
@@ -312,7 +324,6 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 
 | Gap | Impact | Suggested fix |
 |---|---|---|
-| Sandbox `TelemetryEvent.payload` is a `String` | 10 MB string payloads are valid Java but test a different serialization path than real binary tensor payloads | Acceptable for initial sizing; revisit when binary payloads are introduced |
 | Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, CBOR→Arrow parse latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and ship the scrape annotations via the pipeline chart's pod template. |
 
 ---
