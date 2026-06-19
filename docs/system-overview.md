@@ -11,9 +11,9 @@ This document outlines the core architecture and data flows for the mIceWriter t
 
 v2 replaces the v1 per-pod sidecar with **one engine `Deployment` + `Service` per Iceberg table**. The Java SDK routes each `sendAsyncWithRetry(pojo)` to the correct pipeline using the existing `@IcebergEntity(table = "...")` annotation. Pipelines are independent: HPA, resource sizing, and catalog commits are scoped per table.
 
-<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.sendAsyncWithRetry(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, transpiles CBOR → NDJSON → Arrow → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
+<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.sendAsyncWithRetry(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, compiles CBOR → Static Arrow Builders → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
 
-<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to watch records move phase by phase.</sub>
+<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to watch records move phase by phase. *Note: this diagram shows the simplified logical flow per-pod; physically, catalog commits are routed through a leader pod to prevent contention (see §3).*</sub>
 
 A pipeline is a Helm release of the `micewriter-table-pipeline` chart parameterized by `table`, resource budget, replica counts, and flush thresholds. The engine binary is the same across all pipelines but is pinned to one table at startup via `MICEWRITER_TABLE`.
 
@@ -37,8 +37,16 @@ gRPC handles framing. The application-layer payload retains the original per-rec
 ### 2.3 Serialization
 - **Schemas (`RegisterSchema`)** are JSON.
 - **Telemetry records (`Ingest`)** are native CBOR bytes — keeping the SDK stateless, no Arrow schema dictionary per row, framework-agnostic for Spring Boot / Dropwizard.
-- **Engine pipeline (`CBOR → NDJSON → Arrow → Parquet`):** because there is no battle-tested `arrow-cbor` parser in the Apache Arrow ecosystem, the engine transpiles CBOR into NDJSON just-in-time, then leverages `arrow-json` to rigorously enforce Iceberg schemas and manage complex nested memory (validity bitmaps, nested lists, etc.).
-- **Payload limit:** hard-capped at **16 MB** at both SDK and engine. A 16 MB monolithic CBOR array of floats can expand into 200+ MB of `serde_json::Value` DOM in Rust — threatening the engine pod's memory limit during `arrow-json` parsing.
+- **Engine pipeline (AOT Static CBOR → Arrow Compilation):** To achieve ultimate zero-copy performance and strict memory boundaries, v2 utilizes **Ahead-Of-Time (AOT) Schema Compilation**. Instead of dynamic AST parsing (e.g., transpiling to NDJSON), each `engine-{table}` Docker image is compiled via CI/CD with static Rust `ArrowBuilder`s tailored exactly to that table's Iceberg schema. Incoming CBOR bytes are mapped directly into static Rust structs using `#[derive(Deserialize)]` and pushed directly into Arrow.
+
+> [!IMPORTANT]
+> **Mandatory Requirements for AOT Compilation**
+> 
+> Because the engine is statically compiled against a known schema, bypassing dynamic fallback pipelines, you **must** enforce two rules to prevent silent data loss during deployments:
+> 1. **Strict Backward Compatibility:** Schema evolutions (e.g., adding fields) must be backward compatible (e.g., new fields are optional/nullable). If an old app sends an old payload, the new statically compiled engine will gracefully default the missing fields to null.
+> 2. **Strict CI/CD Deployment Ordering:** The custom `engine-{table}` Deployment **must always** be rolled out and stabilized *before* the application Deployment. If a new app deploys first and sends unknown fields to an old engine, the Rust deserializer will silently ignore those fields, resulting in permanent data loss for the duration of the rolling deployment. To actively prevent this, the `RegisterSchema` RPC acts as a **Strict Safety Handshake**: the engine actively rejects the request if it contains unknown fields, intentionally crashing the misordered App deployment before data loss can occur.
+
+- **Payload limit:** hard-capped at **16 MB** at both SDK and engine. Because AOT static compilation avoids dynamic DOM amplification, a 16 MB payload parses directly into an optimal ~16 MB of statically typed Rust memory.
 
 ### 2.4 Table → Endpoint Resolution
 The SDK reads `@IcebergEntity.table` from each POJO class and resolves it to a pipeline endpoint via a layered config:
@@ -53,15 +61,14 @@ Default is **plain gRPC over the cluster network** — the chart ships with no a
 
 ## 3. The Flush Cycle & Graceful Shutdown
 
-To consolidate small records into optimized Iceberg v3 Parquet files while protecting the catalog API from rate limits (the "thundering herd" problem):
+To consolidate small records into optimized Iceberg v3 Parquet files while protecting the catalog API from rate limits (the "thundering herd" problem), the pipeline implements a two-phase flush cycle with a single leader per deployment:
 
-- **Hybrid time/size Column Family swap.** Each engine pod rotates its active RocksDB Column Family and freezes the old one for compilation either on a jittered schedule (~10 minutes ± 2 minutes) OR immediately if uncompressed CF data exceeds 32 MB. The 32 MB ceiling keeps compiled Parquet bytes held in memory under ~15 MB, protecting the pod's memory limit.
-- **Compilation.** Frozen CBOR records are decoded into NDJSON, dynamically cast using the Iceberg schema via `arrow-json`, and compiled into Parquet file batches. The engine performs fast, append-only operations — Puffin deletion vectors and row-level updates are deferred to async Iceberg maintenance jobs outside the pipeline.
-- **Catalog commit.** The pipeline uploads Parquet files to S3 (MinIO or AWS S3) and executes an atomic `FastAppendAction` commit against the catalog (Nessie or AWS Glue). On `CommitFailedException` (optimistic-locking conflict from another pod in the same pipeline), exponential backoff retry resolves the conflict.
-- **SIGTERM emergency flush.** When Kubernetes terminates an engine pod (HPA scale-down, rolling update, eviction), the pod intercepts SIGTERM, pauses new ingestion, forces an immediate compilation/commit of its remaining RocksDB data, and exits.
+- **Hybrid time/size Column Family swap.** Each worker pod rotates its active RocksDB Column Family and freezes the old one for compilation either on a jittered schedule (~10 minutes ± 2 minutes) OR immediately if uncompressed CF data exceeds 32 MB. The 32 MB ceiling keeps compiled Parquet bytes held in memory under ~15 MB.
+- **Compilation & Upload.** Frozen CBOR records are mapped directly into static Rust structs using `#[derive(Deserialize)]`, written into the statically compiled Arrow ArrayBuilders for the table's specific schema, and compiled into Parquet file batches. The worker pod then uploads these Parquet files to the object store (MinIO or AWS S3).
+- **Aggregated Catalog Commit (Leader).** To eliminate optimistic-locking conflicts against the catalog, worker pods send an internal `CommitBatch` gRPC request containing their uploaded Parquet S3 paths to the elected leader pod (discovered via a Kubernetes `Lease`). The leader aggregates paths from multiple workers, writes the Iceberg manifest/manifest lists, and executes an atomic `FastAppendAction` commit to the catalog.
+- **RocksDB Cleanup & Exactly-Once Delivery.** The worker pod only drops its frozen RocksDB Column Family *after* receiving a successful commit ACK from the leader. To prevent duplicate data if a worker crashes after the leader commits but before the ACK, Parquet file names are deterministically generated (e.g., via a hash of the RocksDB CF). On retry, the worker generates the same file path; the leader detects the duplicate path in the catalog, treats the commit as a no-op, and ACKs the worker. This achieves exactly-once delivery. (Note: crashes between upload and commit can result in orphaned Parquet files in S3, which are cleaned up via asynchronous Iceberg `remove_orphan_files` maintenance).
+- **SIGTERM emergency flush.** When Kubernetes terminates an engine pod, the pod intercepts SIGTERM, pauses new ingestion, forces an immediate compilation/upload of its RocksDB data, forwards the paths to the leader, and exits.
 - **Manual flush (testing only).** In non-production environments, `ENABLE_MANUAL_FLUSH=true` enables the `FlushNow` RPC for end-to-end integration tests. Disabled in production to protect the catalog from API abuse.
-
-> ⚠️ **Per-pipeline commit contention:** with HPA, a pipeline may have N pods committing concurrently. v2.0 relies on optimistic-locking retry; for hot tables that hit the contention wall (~10+ pods), the upgrade path is leader election via a Kubernetes `Lease` within the Deployment. Tracked as a v2.x consideration in [per-table-pipelines.md §8](per-table-pipelines.md).
 
 ## 4. Downstream Analytics Readers
 

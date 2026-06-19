@@ -13,15 +13,15 @@ This document describes **v2** of the mIceWriter ingestion architecture: **one e
 
 <img src="v2-topology.svg" alt="v2 per-table topology — a Spring Boot app routes each record by @IcebergEntity table over gRPC :9090 to engine-telemetry, engine-audit, or engine-model-eval (large RAM); each pipeline runs HPA-scaled engine pods backed by per-pod RocksDB and independently commits to a shared Iceberg catalog (Nessie / AWS Glue) and object store (MinIO / AWS S3)" width="100%">
 
-<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to see the flow.</sub>
+<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to see the flow. *Note: this diagram shows the simplified logical flow per-pod; physically, catalog commits are routed through a leader pod to prevent contention.*</sub>
 
 Each pipeline owns exactly one Iceberg table. The engine binary is pinned to a single table at startup via `MICEWRITER_TABLE`; it processes only records destined for that table and commits only to that table. Pipelines are independent — no cross-pipeline coordination, no shared state.
 
 ## 2. End-to-end data flow
 
-<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.sendAsyncWithRetry(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, transpiles CBOR → NDJSON → Arrow → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
+<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.sendAsyncWithRetry(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, compiles CBOR → Static Arrow Builders → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
 
-<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to watch records move phase by phase.</sub>
+<sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to watch records move phase by phase. *Note: this diagram shows the simplified logical flow per-pod; physically, catalog commits are routed through a leader pod to prevent contention (see §8).*</sub>
 
 ## 3. Wire protocol
 
@@ -33,7 +33,7 @@ The wire format keeps the original pre-split (v1.0.0) **CBOR** payload shape; **
 | `Ingest` | SDK → Pipeline | Streaming CBOR records | Bidi streaming over a long-lived channel. ACK per record. |
 | `FlushNow` | SDK → Pipeline | Empty | Unary; only honored when `ENABLE_MANUAL_FLUSH=true`. Test environments only. |
 
-The 16 MB per-payload cap and the CBOR-DOM amplification reasoning apply to v2's CBOR pipeline — see [system-overview.md §2](system-overview.md). (This reasoning is specific to v2: current v1 parses JSON directly via `arrow-json` and no longer goes through a `serde_json::Value` DOM.)
+The 16 MB per-payload cap still applies, but thanks to the **AOT Static CBOR → Arrow Compilation** architecture, v2 completely eliminates the CBOR-DOM memory amplification problem. See [system-overview.md §2](system-overview.md) for the critical rules governing CI/CD deployment ordering and schema backward compatibility.
 
 ## 4. SDK table-to-endpoint routing
 
@@ -60,6 +60,8 @@ micewriter:
 | **Pipeline unreachable at app startup** | `RegisterSchema` retries with exponential backoff for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s), then proceeds. First `sendAsyncWithRetry()` per affected table retries registration before its first record. App never blocks indefinitely. |
 | **Pipeline unreachable during `sendAsyncWithRetry()`** | Bounded retry with exponential backoff for `MICEWRITER_SEND_RETRY_SECONDS` (default 30s), then throws with the unresolvable table named. No unbounded SDK buffering (preserves JVM-heap-pressure guarantee). |
 | **Engine pod restart (HPA scale, deploy, OOM)** | gRPC channel transparently re-establishes via native retry policy. In-flight records on the dying pod are flushed via `SIGTERM` emergency drain; records not yet ACKed by the SDK are re-sent on the new channel. |
+| **Leader pod restart (during commit phase)** | Leader lease expires and another worker claims it. Workers holding frozen RocksDB column families retry sending their `CommitBatch` gRPC requests to the new leader until successful. |
+| **Worker pod restart (during commit phase)** | If a worker dies *after* uploading Parquet to S3 but *before* receiving the leader's commit ACK, the worker restarts, re-reads the retained RocksDB column family, recompiles Parquet, and retries the commit. To prevent cross-pod filename collisions, the deterministic filename is generated via `hash(CF_content) + Pod_UUID` (the UUID is generated once when the CF is opened and stored in the CF metadata). The restarted worker re-reads the same UUID and generates the exact same file path. The leader detects the duplicate path in the catalog, preventing duplicate data (exactly-once delivery). |
 | **Whole-pipeline outage** | `sendAsyncWithRetry()` calls to that table fail fast after the retry budget. Other tables' pipelines unaffected. |
 | **App pod restart** | SDK re-registers schemas with each pipeline on startup. No persistent state in the SDK. |
 
@@ -82,13 +84,17 @@ For zero-trust adopters, mTLS is added as a **service-mesh overlay** without SDK
 
 **HPA signal:** v2.0 uses default CPU/memory metrics for simplicity. CPU is a lagging signal (spikes during flush, not ingest) and memory tracks RocksDB CF growth which is a decent flush-imminent proxy. If load testing shows CPU/memory reacts too slowly to bursts, the upgrade path is KEDA + PromQL against Grafana Cloud (`micewriter_rocksdb_cf_bytes`, `rate(micewriter_ingest_records_total[1m])`) — no SDK or engine changes required.
 
-## 8. Catalog commits with multiple pods per pipeline
+## 8. Aggregated catalog commits via Kubernetes Lease
 
-With HPA, a pipeline can have N engine pods all running their own flush loop and committing to the same Iceberg table. v2.0 relies on `FastAppendAction`'s built-in `CommitFailedException` + exponential backoff to resolve optimistic-locking conflicts. Cleanly handles small N (~2–5 pods per pipeline) with zero added infrastructure.
+With HPA, a pipeline can have N worker pods heavily parallelizing the CPU-intensive Parquet generation and network-intensive S3 uploads. However, if all N pods committed directly to the catalog, hot tables would hit severe `CommitFailedException` retry storms. 
 
-**Known limit:** retry storms get expensive above ~10 pods per table.
+To resolve this, the Deployment elects a single leader pod via a Kubernetes `Lease` resource:
+1. **Worker:** Compiles Parquet and uploads to S3/MinIO.
+2. **Worker:** Discovers the current leader identity from the Kubernetes `Lease` and sends an internal `CommitBatch` gRPC request with the uploaded Parquet file paths.
+3. **Leader (5-Minute Aggregation Window):** Accepts `CommitBatch` requests from all workers and queues them in memory for up to 5 minutes. Every 5 minutes, it aggregates all collected Parquet files, writes a single optimized Iceberg manifest/manifest list, and executes one atomic `FastAppendAction` commit to the catalog. This radically minimizes catalog snapshots (only 288/day) and prevents metadata bloat.
+4. **Worker:** Receives the commit ACK at the end of the 5-minute window and deletes the frozen RocksDB data.
 
-**Upgrade path (v2.x):** if load testing shows hot tables hitting commit-retry contention, add leader election within the Deployment via a Kubernetes `Lease` resource — one pod commits, others forward compiled Parquet for batched commit. Deferred until measurements justify it.
+This provides the best of both worlds: horizontally scaled data I/O, with serialized, conflict-free metadata commits.
 
 ## 9. Operating a pipeline
 
@@ -108,6 +114,8 @@ helm install engine-telemetry-events ./charts/table-pipeline \
 ```
 
 Each release provisions a `Deployment`, `Service`, and `HorizontalPodAutoscaler` named after the table.
+
+**Durability vs. Elasticity Trade-off:** By default, RocksDB is backed by an ephemeral `emptyDir` volume to allow the HPA to instantly scale up pods during traffic spikes without waiting for cloud storage provisioning. However, if a Kubernetes Node crashes, all pods on that node die and lose their uncommitted RocksDB data. For hyper-critical tables (e.g., `billing_events`), the Helm chart can be configured to provision a `StatefulSet` with `PersistentVolumeClaims` instead of a `Deployment`, trading HPA elasticity for 100% durability across node crashes.
 
 ## 10. Adopter onboarding
 
