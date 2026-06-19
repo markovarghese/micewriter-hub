@@ -4,7 +4,7 @@
 [![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
 
-> **Role in the [feasibility evaluation](feasibility.md):** the operational deploy flow that stands up the local stack before any load test runs. Steps 1–6 deploy infrastructure + engine + webhook + sandbox; Step 7 onward verifies the pipeline is ready to drive load against. Running the [load testing specification](load-testing-spec.md) assumes this guide has been completed once.
+> **Role in the [feasibility evaluation](feasibility.md):** the operational deploy flow that stands up the local stack before any load test runs. Steps 1–6 deploy infrastructure + the per-table pipeline(s) + sandbox; Step 7 onward verifies the pipeline is ready to drive load against. Running the [load testing specification](load-testing-spec.md) assumes this guide has been completed once.
 
 End-to-end guide for deploying the full mIceWriter stack onto the local k3s-on-Hyper-V
 cluster provisioned by [k3sonhyperv](https://github.com/markovarghese/k3sonhyperv).
@@ -62,7 +62,6 @@ This single command installs, in order:
 
 | Component | Purpose |
 |---|---|
-| **cert-manager** | Provides TLS certificates for the mutating webhook |
 | **Local registry** (`registry:2`) | Image distribution endpoint at `k8s-node-1.local:5000` |
 | **MinIO** | S3-compatible object store for Parquet files |
 | **Apache Nessie** | Iceberg REST Catalog for atomic table commits |
@@ -93,30 +92,44 @@ From the `micewriter-engine` directory:
 powershell -ExecutionPolicy Bypass -File .\push.ps1
 ```
 
-This builds the Rust sidecar Docker image and pushes it to the local registry. The
-k8s-injector embeds this image reference in every annotated pod it mutates, so the image
-must be available in the registry before any application pods are created.
+This builds the Rust engine Docker image and pushes it to the local registry. Every
+per-table pipeline `Deployment` runs this image, so it must be available in the registry
+before any pipeline is installed.
 
 ---
 
-## Step 5 — Deploy the mutating webhook
+## Step 5 — Install the per-table pipeline
 
-From the `micewriter-k8s-injector` directory:
+A pipeline is one Helm release of the `micewriter-table-pipeline` chart per Iceberg table.
+The sandbox writes to the `load_test_events` table (namespace `micewriter`), so install a
+pipeline for it. From the `micewriter-local-infra` directory:
 
 ```powershell
-# Build and push the webhook image
-powershell -ExecutionPolicy Bypass -File .\run.ps1 push
-
-# Deploy the Helm chart (cert-manager must be ready from Step 3)
-powershell -ExecutionPolicy Bypass -File .\run.ps1 deploy
+helm install engine-load-test-events ./charts/table-pipeline `
+  --namespace micewriter --create-namespace `
+  --set table=load_test_events `
+  --set namespace=micewriter `
+  --set image=k8s-node-1.local:5000/micewriter-engine:latest `
+  --set enableManualFlush=true       # non-prod: enables the FlushNow RPC for tests
 ```
 
-> If `deploy` fails with "no kind Issuer", wait ~10 seconds and retry. cert-manager CRDs
-> occasionally take a moment to be served after the pods become Available.
+This provisions a `Deployment`, a `Service`, and a `HorizontalPodAutoscaler` for the table.
+The engine binary is pinned to `load_test_events` via `MICEWRITER_TABLE` and listens for
+gRPC on `:9090`.
 
-The webhook is now live. Any pod created with the annotation
-`iceberg-stream.micewriter.io/inject: "true"` will automatically receive the engine
-sidecar, the shared UDS socket volume, and a RocksDB PVC.
+> **Service name vs. table name.** `load_test_events` contains underscores, which are not
+> valid in a Kubernetes `Service` (DNS) name, so the chart names the Service
+> `engine-load-test-events`. The sandbox therefore maps the table to that endpoint with a
+> `resolverOverrides` entry (see Step 6) rather than the bare `engine-{table}` convention.
+
+Confirm the pipeline is healthy:
+
+```powershell
+kubectl get pods,svc,hpa -n micewriter
+kubectl logs -n micewriter deploy/engine-load-test-events --tail=20
+```
+
+Expected: a log line like `grpc_server: listening on 0.0.0.0:9090 table=load_test_events`.
 
 ---
 
@@ -130,8 +143,15 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 deploy
 
 This builds the Spring Boot image (using the parent directory as Docker build context so
 both `micewriter-sdk-java` and `micewriter-sandbox` sources are compiled together),
-pushes it to the local registry, and applies the k8s manifests. The mutating webhook
-automatically injects the engine sidecar on pod creation.
+pushes it to the local registry, and applies the k8s manifests. There is no sidecar
+injection — the app points at the pipeline resolver in its `application.yml`:
+
+```yaml
+micewriter:
+  resolver: "engine-{table}.micewriter.svc:9090"
+  resolverOverrides:
+    load_test_events: "engine-load-test-events.micewriter.svc:9090"
+```
 
 ---
 
@@ -150,12 +170,13 @@ curl -X POST "http://k8s-node-1.local/events/load?count=1000"
 # → {"sent":1000,"elapsedMs":...,"throughputPerSec":...}
 ```
 
-### Watch the engine flush
+### Watch the pipeline flush
 
-The sidecar flushes every ~5 minutes or when 128 MB of data is accumulated. Stream its logs to watch:
+The pipeline flushes on a jittered timer (~10 min ± 2 min) or as soon as the active
+RocksDB column family crosses 32 MB. Stream its logs to watch:
 
 ```powershell
-kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine --follow
+kubectl logs -n micewriter deploy/engine-load-test-events --follow
 ```
 
 Look for log lines like:
@@ -168,7 +189,7 @@ iceberg_writer: commit succeeded, snapshot_id=...
 ### Confirm data landed
 
 1. **MinIO console** — `http://k8s-node-1.local:9001`
-   Browse `iceberg/` → `micewriter/` → `telemetry_events/` — Parquet files appear after
+   Browse `iceberg/` → `micewriter/` → `load_test_events/` — Parquet files appear after
    the first flush cycle.
 
 2. **Nessie API** — confirm the Iceberg table exists:
@@ -180,7 +201,7 @@ iceberg_writer: commit succeeded, snapshot_id=...
 
 ## Step 8 — Query your data
 
-Once the engine has completed its first flush cycle (watch for `iceberg_writer: commit succeeded` in the logs), the Iceberg table is ready to query.
+Once the pipeline has completed its first flush cycle (watch for `iceberg_writer: commit succeeded` in the logs), the Iceberg table is ready to query.
 
 👉 **[Querying Iceberg Tables — Athena & Superset guide](querying.md)**
 
@@ -193,9 +214,8 @@ Once the engine has completed its first flush cycle (watch for `iceberg_writer: 
 # (from micewriter-sandbox)
 powershell -ExecutionPolicy Bypass -File .\run.ps1 undeploy
 
-# Undeploy the webhook
-# (from micewriter-k8s-injector)
-powershell -ExecutionPolicy Bypass -File .\run.ps1 undeploy
+# Uninstall the per-table pipeline(s)
+helm uninstall engine-load-test-events -n micewriter
 
 # Tear down infrastructure (keeps PVCs — MinIO data survives)
 # (from micewriter-local-infra)
@@ -211,8 +231,8 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 clean
 
 | What changed | Command |
 |---|---|
-| Engine Rust source | `powershell -ExecutionPolicy Bypass -File .\push.ps1` in `micewriter-engine`, then restart the sandbox pod |
-| Webhook Go source | `powershell -ExecutionPolicy Bypass -File .\run.ps1 push` + `powershell -ExecutionPolicy Bypass -File .\run.ps1 deploy` in `micewriter-k8s-injector` |
+| Engine Rust source | `powershell -ExecutionPolicy Bypass -File .\push.ps1` in `micewriter-engine`, then `kubectl rollout restart deploy/engine-load-test-events -n micewriter` |
+| Pipeline chart / sizing | `helm upgrade engine-load-test-events ./charts/table-pipeline ...` in `micewriter-local-infra` (idempotent) |
 | Sandbox Java source | `powershell -ExecutionPolicy Bypass -File .\run.ps1 deploy` in `micewriter-sandbox` (re-builds and re-pushes) |
 | Infrastructure values | `powershell -ExecutionPolicy Bypass -File .\run.ps1 up` in `micewriter-local-infra` (Helm upgrade is idempotent) |
 

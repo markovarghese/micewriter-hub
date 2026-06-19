@@ -1,11 +1,11 @@
 # 🐳 micewriter-local-infra
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
 [![Component: Local Infrastructure](https://img.shields.io/badge/Component-Local%20Infrastructure-green?style=flat-square)](#)
 
-> **Role in the [feasibility evaluation](feasibility.md):** stands in for the AWS S3 + Glue side of production EKS. Without this, the engine sidecar has no catalog to commit to and no object store to upload to during load testing.
+> **Role in the [feasibility evaluation](feasibility.md):** stands in for the AWS S3 + Glue side of production EKS. Without this, the engine pipelines have no catalog to commit to and no object store to upload to during load testing.
 
 This repository contains the Kubernetes manifests and Helm charts required to simulate the AWS S3 and AWS Glue ecosystem on the local k3s-on-Hyper-V cluster provisioned by the [k3sonhyperv](https://github.com/markovarghese/k3sonhyperv) repo. All endpoints are bound to `k8s-node-1.local` (the k3s control-plane node) via k3s Klipper LoadBalancer; the `local-path` storage class is assumed for PVCs.
 
@@ -13,19 +13,21 @@ This repository contains the Kubernetes manifests and Helm charts required to si
 - **Orchestration:** Helm, Kubernetes Manifests (kubectl and helm run inside Docker — no native tools required)
 - **Object Storage:** MinIO
 - **Iceberg Catalog:** Apache Nessie (in-memory, ephemeral by design for local dev)
+- **Pipeline provisioning:** hosts the `micewriter-table-pipeline` Helm chart (`charts/table-pipeline`) — one engine `Deployment` + `Service` + `HorizontalPodAutoscaler` per Iceberg table
 - **Query Engine (optional):** Trino with Iceberg REST connector
 - **Query UI (optional):** Apache Superset (with PostgreSQL + Redis)
 
 ## ⚙️ Functionality
 Provides a 1-click local testing environment for developers to test the full pipeline end-to-end without needing real cloud credentials.
-1. **Storage Mock:** Deploys MinIO to act as an S3-compatible object store, allowing the sidecar to upload Parquet files using standard AWS SDKs pointed to the local endpoint.
+1. **Storage Mock:** Deploys MinIO to act as an S3-compatible object store, allowing the engine pipelines to upload Parquet files using standard AWS SDKs pointed to the local endpoint.
 2. **Catalog Mock:** Deploys Apache Nessie (in-memory) to handle atomic Iceberg table commits and versioning.
-3. **Query Stack (optional):** Deploys Trino (pre-configured with the Iceberg/Nessie/MinIO catalog) and Apache Superset (SQL UI). See [querying.md](querying.md) for usage.
+3. **Pipeline Chart:** Hosts the `micewriter-table-pipeline` Helm chart used to provision one engine pipeline per Iceberg table — `helm install engine-<table> ./charts/table-pipeline --set table=<table> ...`. See [per-table-pipelines.md §9](per-table-pipelines.md).
+4. **Query Stack (optional):** Deploys Trino (pre-configured with the Iceberg/Nessie/MinIO catalog) and Apache Superset (SQL UI). See [querying.md](querying.md) for usage.
 
 ## 🚀 Commands
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run.ps1 up          # Deploy core infra: cert-manager, registry, MinIO, Nessie
+powershell -ExecutionPolicy Bypass -File .\run.ps1 up          # Deploy core infra: registry, MinIO, Nessie
 powershell -ExecutionPolicy Bypass -File .\run.ps1 down        # Uninstall MinIO + Nessie (keeps namespace and PVCs)
 powershell -ExecutionPolicy Bypass -File .\run.ps1 clean       # Full teardown — purges namespace and all PVCs
 powershell -ExecutionPolicy Bypass -File .\run.ps1 status      # Show pod status in micewriter-infra namespace

@@ -1,14 +1,16 @@
 # 📥 micewriter-hub
 > 🌐 Architecture, motivation, and feasibility evaluation for the **mIceWriter Ingestion Ecosystem** — a sidecar that lets EKS-deployed apps persist to Apache Iceberg without blocking the hot path or burdening their JVM.
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](README.md)
 [![Component: Central Hub](https://img.shields.io/badge/Component-Central%20Hub-brightgreen?style=flat-square)](#)
 
 mIceWriter is an **ingestion platform** for applications running on AWS EKS (or any Kubernetes cluster) that need to persist telemetry, audit, or model-payload data to Apache Iceberg tables — without paying S3 latency on the hot path, without buffering large payloads in their own JVM heap, and without flooding S3 with tiny files that ruin downstream query performance.
 
-In **v2**, mIceWriter deploys **one engine `Deployment` + `Service` per Iceberg table**. Applications add the Java SDK as a Maven dependency, annotate domain objects with `@IcebergEntity(table = "...")`, and call `icebergTemplate.send(pojo)`. The SDK routes each record over gRPC to the right pipeline. Each pipeline absorbs writes with sub-millisecond ack and asynchronously consolidates them into Parquet files committed to the Iceberg catalog (AWS Glue in production, Apache Nessie locally).
+In **v2**, mIceWriter deploys **one engine `Deployment` + `Service` per Iceberg table**. Applications add the Java SDK as a Maven dependency, annotate domain objects with `@IcebergEntity(table = "...")`, and call `icebergTemplate.sendAsyncWithRetry(pojo)`. The SDK routes each record over gRPC to the right pipeline. Each pipeline absorbs writes with sub-millisecond ack and asynchronously consolidates them into Parquet files committed to the Iceberg catalog (AWS Glue in production, Apache Nessie locally).
 
 > 📜 The v1 per-pod sidecar variant is an actively maintained release line on the `v1` branch of every `micewriter-*` repo (`v1.0.0` tags the original snapshot). v1 and v2 evolve independently. See [v1 → v2 migration rationale](docs/v1-to-v2-migration.md) for the pivot story.
+
+> 🚧 **Spec vs. code:** These docs describe the **v2 target spec**. The `micewriter-*` implementation repos are mid-migration from v1 — confirm a given v2 capability has actually merged before depending on it.
 
 ---
 

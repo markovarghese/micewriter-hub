@@ -1,7 +1,7 @@
 # 🔀 v1 → v2 Migration Rationale
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: Migration Notes](https://img.shields.io/badge/Component-Migration%20Notes-yellow?style=flat-square)](#)
 
@@ -72,7 +72,7 @@ The conversation that drove v2 weighed several alternatives:
 
 Honest about the price:
 
-- **SDK transport rewrite.** Netty UDS → gRPC client. The public API (`@IcebergEntity`, `icebergTemplate.send(pojo)`) is unchanged, but the transport layer is the largest single piece of v2 work.
+- **SDK transport rewrite.** Netty UDS → gRPC client. The public API (`@IcebergEntity`, `icebergTemplate.sendAsyncWithRetry(pojo)`) is unchanged, but the transport layer is the largest single piece of v2 work.
 - **Helm release per Iceberg table.** Adding a table now requires `helm install`, not just a catalog operation. Acceptable for the "infrequent new tables" profile that drove the choice.
 - **No more single-annotation adoption.** v1 was one annotation; v2 is one env var + a Maven dep + the per-table Helm release (done by the platform team, not the adopter). Still vastly less than implementing buffering yourself, but no longer "one annotation."
 - **Sub-millisecond instead of microsecond latency.** gRPC over the cluster network is ~1 ms p50 instead of UDS's ~10 µs. For Spring Boot / Dropwizard request handlers (the intended adopter), this is well under the request-budget noise floor.
