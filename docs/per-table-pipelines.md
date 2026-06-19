@@ -1,11 +1,11 @@
 # 🛤️ v2: Per-Table Engine Pipelines
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: v2 Architecture](https://img.shields.io/badge/Component-v2%20Architecture-orange?style=flat-square)](#)
 
-This document describes **v2** of the mIceWriter ingestion architecture: **one engine `Deployment` + `Service` per Iceberg table**, replacing the v1 per-pod sidecar topology. The Java SDK routes each `send(pojo)` to the correct pipeline using the existing `@IcebergEntity(table = "...")` annotation. New pipelines are provisioned by Helm release; new tables are expected infrequently.
+This document describes **v2** of the mIceWriter ingestion architecture: **one engine `Deployment` + `Service` per Iceberg table**, replacing the v1 per-pod sidecar topology. The Java SDK routes each `sendAsyncWithRetry(pojo)` to the correct pipeline using the existing `@IcebergEntity(table = "...")` annotation. New pipelines are provisioned by Helm release; new tables are expected infrequently.
 
 > 📜 **Looking for v1?** The per-pod sidecar variant is an actively maintained release line on the `v1` branch of every `micewriter-*` repo (`v1.0.0` tags the original snapshot). See [v1-to-v2-migration.md](v1-to-v2-migration.md) for the pivot rationale.
 
@@ -19,7 +19,7 @@ Each pipeline owns exactly one Iceberg table. The engine binary is pinned to a s
 
 ## 2. End-to-end data flow
 
-<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.send(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, transpiles CBOR → NDJSON → Arrow → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
+<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.sendAsyncWithRetry(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, transpiles CBOR → NDJSON → Arrow → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
 
 <sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to watch records move phase by phase.</sub>
 
@@ -57,10 +57,10 @@ micewriter:
 
 | Event | Behavior |
 |---|---|
-| **Pipeline unreachable at app startup** | `RegisterSchema` retries with exponential backoff for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s), then proceeds. First `send()` per affected table retries registration before its first record. App never blocks indefinitely. |
-| **Pipeline unreachable during `send()`** | Bounded retry with exponential backoff for `MICEWRITER_SEND_RETRY_SECONDS` (default 30s), then throws with the unresolvable table named. No unbounded SDK buffering (preserves JVM-heap-pressure guarantee). |
+| **Pipeline unreachable at app startup** | `RegisterSchema` retries with exponential backoff for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s), then proceeds. First `sendAsyncWithRetry()` per affected table retries registration before its first record. App never blocks indefinitely. |
+| **Pipeline unreachable during `sendAsyncWithRetry()`** | Bounded retry with exponential backoff for `MICEWRITER_SEND_RETRY_SECONDS` (default 30s), then throws with the unresolvable table named. No unbounded SDK buffering (preserves JVM-heap-pressure guarantee). |
 | **Engine pod restart (HPA scale, deploy, OOM)** | gRPC channel transparently re-establishes via native retry policy. In-flight records on the dying pod are flushed via `SIGTERM` emergency drain; records not yet ACKed by the SDK are re-sent on the new channel. |
-| **Whole-pipeline outage** | `send()` calls to that table fail fast after the retry budget. Other tables' pipelines unaffected. |
+| **Whole-pipeline outage** | `sendAsyncWithRetry()` calls to that table fail fast after the retry budget. Other tables' pipelines unaffected. |
 | **App pod restart** | SDK re-registers schemas with each pipeline on startup. No persistent state in the SDK. |
 
 ## 6. Auth between SDK and pipelines
@@ -134,7 +134,7 @@ For a Spring Boot or Dropwizard app to start writing to a new Iceberg table:
 4. **Inject the template and send:**
    ```java
    @Autowired IcebergStreamTemplate icebergTemplate;
-   icebergTemplate.send(new TelemetryEvent(...));
+   icebergTemplate.sendAsyncWithRetry(new TelemetryEvent(...));
    ```
 
 There is no Kubernetes annotation, no sidecar to inject, no per-pod PVC to provision. The v1 `micewriter-k8s-injector` admission webhook is sunset in v2.

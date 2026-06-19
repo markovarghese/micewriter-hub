@@ -1,7 +1,7 @@
 # 🌐 System Overview
-> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)**
+> 🌐 Part of the **[mIceWriter Telemetry Ingestion Ecosystem](../README.md)**
 
-[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](file:///c:/Users/marko/source/repos/micewriter-hub/README.md)
+[![Ecosystem: mIceWriter](https://img.shields.io/badge/Ecosystem-mIceWriter-blueviolet?style=flat-square)](../README.md)
 [![Lens: What](https://img.shields.io/badge/Lens-What-green?style=flat-square)](#)
 [![Component: System Overview](https://img.shields.io/badge/Component-System%20Overview-lightgrey?style=flat-square)](#)
 
@@ -9,9 +9,9 @@ This document outlines the core architecture and data flows for the mIceWriter t
 
 ## 1. Global Architecture & Topology
 
-v2 replaces the v1 per-pod sidecar with **one engine `Deployment` + `Service` per Iceberg table**. The Java SDK routes each `send(pojo)` to the correct pipeline using the existing `@IcebergEntity(table = "...")` annotation. Pipelines are independent: HPA, resource sizing, and catalog commits are scoped per table.
+v2 replaces the v1 per-pod sidecar with **one engine `Deployment` + `Service` per Iceberg table**. The Java SDK routes each `sendAsyncWithRetry(pojo)` to the correct pipeline using the existing `@IcebergEntity(table = "...")` annotation. Pipelines are independent: HPA, resource sizing, and catalog commits are scoped per table.
 
-<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.send(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, transpiles CBOR → NDJSON → Arrow → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
+<img src="v2-data-flow.svg" alt="v2 end-to-end data flow — Startup & Registration: SDK scans @IcebergEntity classes, resolves table to endpoint, calls REGISTER_SCHEMA over gRPC, pipeline ensures the Iceberg table exists. Hot path (sub-ms ack): app calls icebergTemplate.sendAsyncWithRetry(pojo), SDK routes by table and streams CBOR over gRPC, pipeline appends to its active RocksDB column family and ACKs. Flush cycle (per pod): pipeline rotates its column family on a 10 min ± 2 min timer or 32 MB, reads the frozen column family, transpiles CBOR → NDJSON → Arrow → Parquet, PUTs Parquet files to the object store, runs a FastAppendAction commit against the catalog, and drops the frozen column family" width="100%">
 
 <sub>↻ Animated SVG — open in a browser or VS Code Markdown preview to watch records move phase by phase.</sub>
 

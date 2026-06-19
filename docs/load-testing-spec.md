@@ -5,20 +5,20 @@
 [![Lens: Is it viable?](https://img.shields.io/badge/Lens-Is%20it%20viable%3F-blue?style=flat-square)](#)
 [![Component: Load Testing](https://img.shields.io/badge/Component-Load%20Testing-orange?style=flat-square)](#)
 
-> **Role in the [feasibility evaluation](feasibility.md):** the measurement protocol. Defines the payload-size × event-rate matrix, the metrics to collect per scenario, the results template, and how the numbers feed back into the injector's default resource requests/limits.
+> **Role in the [feasibility evaluation](feasibility.md):** the measurement protocol. Defines the payload-size × event-rate matrix, the metrics to collect per scenario, the results template, and how the numbers feed back into the pipeline chart's default resource requests/limits.
 
 ## 1. Goal
 
-Characterize the resource consumption of the **micewriter-engine sidecar container** under sustained load so that the injector's default CPU/memory requests and limits (`micewriter-k8s-injector/charts/micewriter-k8s-injector/values.yaml`) can be set to right-sized values rather than guesses.
+Characterize the resource consumption of a **micewriter-engine pipeline pod** under sustained load so that the pipeline chart's default CPU/memory requests and limits (`micewriter-local-infra/charts/table-pipeline/values.yaml`) can be set to right-sized values rather than guesses.
 
 The primary question is:
 
-> *For a given event size and event rate, how much CPU and memory does the engine sidecar require to sustain X minutes of continuous telemetry ingestion from micewriter-sandbox without OOMKill or CPU throttling?*
+> *For a given event size and event rate, how much CPU and memory does an engine pipeline pod require to sustain X minutes of continuous telemetry ingestion from micewriter-sandbox without OOMKill or CPU throttling?*
 
 Secondary outputs:
-- How fast does the RocksDB ephemeral PVC fill up at each event-size/rate combination (informs `rocksdbStorageSize`)
+- How fast does the RocksDB volume fill up at each event-size/rate combination (informs the pipeline's volume size)
 - How does flush latency (time from CF rotation to Nessie commit) scale with payload volume
-- Whether the current 128 MB `MAX_PAYLOAD_SIZE` cap in the UDS server is a practical concern at the 10 MB event size
+- Whether the 16 MB `MAX_PAYLOAD_SIZE` cap in the gRPC server is a practical concern at the 10 MB event size
 
 ---
 
@@ -28,10 +28,10 @@ All metrics land in **Grafana Cloud** via the Grafana Alloy DaemonSet already in
 
 | Metric | Source | Query |
 |---|---|---|
-| Engine CPU (used) | cAdvisor → Grafana Cloud | `rate(container_cpu_usage_seconds_total{namespace="micewriter-sandbox", container="micewriter-engine"}[1m])` |
-| Engine memory (used) | cAdvisor → Grafana Cloud | `container_memory_working_set_bytes{namespace="micewriter-sandbox", container="micewriter-engine"}` |
-| RocksDB PVC utilisation | kubelet → Grafana Cloud | `kubelet_volume_stats_used_bytes{persistentvolumeclaim=~"rocksdb-.*"}` |
-| Engine flush latency | Engine logs → Loki | LogQL: `{namespace="micewriter-sandbox", container="micewriter-engine"} \|~ "rotating column family\|Table flushed"` — measure the wall-clock gap between rotation and commit |
+| Engine CPU (used) | cAdvisor → Grafana Cloud | `rate(container_cpu_usage_seconds_total{namespace="micewriter", pod=~"engine-load-test-events.*"}[1m])` |
+| Engine memory (used) | cAdvisor → Grafana Cloud | `container_memory_working_set_bytes{namespace="micewriter", pod=~"engine-load-test-events.*"}` |
+| RocksDB volume utilisation | kubelet → Grafana Cloud | `kubelet_volume_stats_used_bytes{persistentvolumeclaim=~"rocksdb-.*"}` |
+| Engine flush latency | Engine logs → Loki | LogQL: `{namespace="micewriter", pod=~"engine-load-test-events.*"} \|~ "rotating column family\|Table flushed"` — measure the wall-clock gap between rotation and commit |
 | MinIO throughput / errors | MinIO Prometheus endpoint → Grafana Cloud | `rate(minio_s3_traffic_received_bytes_total[1m])`, `rate(minio_s3_requests_errors_total[1m])` |
 | Nessie commit latency | Nessie Quarkus metrics → Grafana Cloud | `histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri=~".*iceberg.*"}[1m]))` |
 | Sandbox send rate / latency / errors | Micrometer → Grafana Cloud | `rate(micewriter_loadtest_events_sent_total[1m])`, `micewriter_loadtest_send_seconds` histogram |
@@ -50,7 +50,7 @@ The independent variables and their levels:
 | **Event rate** | 1 · 10 · 100 · 500 events/sec |
 | **Duration** | 15 min (covers at least one full flush cycle) |
 
-This produces a 4 × 4 matrix of 16 scenarios. Not all combinations are meaningful — a 10 MB payload at 500 events/sec (5 GB/sec into a sidecar with 512 Mi memory limit) will OOMKill immediately. Run scenarios in order of increasing stress and stop a series early if the sidecar is evicted.
+This produces a 4 × 4 matrix of 16 scenarios. Not all combinations are meaningful — a 10 MB payload at 500 events/sec (5 GB/sec into a pipeline pod with a 512 Mi memory limit) will OOMKill immediately. Run scenarios in order of increasing stress and stop a series early if the pod is evicted.
 
 ### Recommended run order
 
@@ -64,7 +64,7 @@ Start with the diagonal (moderate stress per cell), then fill in neighbours:
 500/s   [12 ]   [13 ]    skip    skip
 ```
 
-Scenarios marked `skip` are expected to exceed the engine's memory limit given the current 10-minute RocksDB buffer window. Run them only after resource limits are raised experimentally.
+Scenarios marked `skip` are expected to exceed the engine's memory limit given the 10-minute RocksDB buffer window. Run them only after resource limits are raised experimentally.
 
 ---
 
@@ -75,7 +75,7 @@ All infra must be up before running any scenario:
 - The Nessie chart must be ≥ 0.107 with `catalog.enabled: true` and an Iceberg warehouse + S3 storage block configured.
 - Verify with: `curl -sI http://k8s-node-1.local:19120/iceberg/v1/config` — expect 200, not 404.
 
-If 404, the engine's flush will fail silently for an entire flush window and could OOM the sidecar under sustained load (real failure mode observed; see markovarghese/micewriter-engine#1).
+If 404, the engine's flush will fail silently for an entire flush window and could OOM the pipeline pod under sustained load (real failure mode observed; see markovarghese/micewriter-engine#1).
 
 
 ```powershell
@@ -86,28 +86,31 @@ If 404, the engine's flush will fail silently for an entire flush window and cou
 # From micewriter-engine
 .\push.ps1            # Build and push engine image
 
-# From micewriter-k8s-injector
-.\run.ps1 push
-.\run.ps1 deploy
+# From micewriter-local-infra — install the per-table pipeline
+helm install engine-load-test-events ./charts/table-pipeline `
+  --namespace micewriter --create-namespace `
+  --set table=load_test_events --set namespace=micewriter `
+  --set image=k8s-node-1.local:5000/micewriter-engine:latest `
+  --set enableManualFlush=true
 
 # From micewriter-sandbox
 .\run.ps1 deploy
 ```
 
-Confirm the engine sidecar is running and healthy before starting:
+Confirm the engine pipeline is running and healthy before starting:
 
 ```powershell
-kubectl get pod -n micewriter-sandbox
-kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine --tail=20
+kubectl get pod -n micewriter
+kubectl logs -n micewriter deploy/engine-load-test-events --tail=20
 ```
 
-Expected: log line `uds_server: listening on /var/run/app/iceberg.sock`.
+Expected: log line `grpc_server: listening on 0.0.0.0:9090 table=load_test_events`.
 
 ---
 
 ## 5. Running a Test Scenario
 
-The sandbox application itself drives load through its in-process SDK call path — no external client (k6, jmeter, hey) needed. This removes the HTTP-server hop that an external generator would add, which matters because the SDK's `send()` is serialized through a single Netty event loop lock and concurrent HTTP clients would just queue behind it without buying any parallelism.
+The sandbox application itself drives load through its in-process SDK call path — no external client (k6, jmeter, hey) needed. This removes the HTTP-server hop that an external generator would add, and lets the generator exercise the SDK's bounded-async `sendAsyncWithRetry` pipelining directly rather than queueing behind an external client's request loop.
 
 The endpoints are:
 
@@ -208,14 +211,14 @@ If a scenario shows the engine OOMKilling, **verify the engine itself is the bot
 | Is MinIO's request queue backing up? | `minio_s3_requests_inflight` (any non-zero floor under flush) |
 | Is Nessie CPU-throttled? | `rate(container_cpu_cfs_throttled_seconds_total{pod=~"micewriter-nessie.*"}[1m]) > 0` |
 | Is Nessie's commit slow? | `histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri=~".*iceberg.*"}[1m]))` |
-| Is the engine sidecar memory near limit? | `container_memory_working_set_bytes{container="micewriter-engine"} / 1024 / 1024` (compare against 512) |
-| Is the engine flush hanging? | LogQL: `{container="micewriter-engine"} \|~ "rotating column family\|commit succeeded"` and eyeball the time gap |
+| Is the engine pod memory near limit? | `container_memory_working_set_bytes{namespace="micewriter", pod=~"engine-load-test-events.*"} / 1024 / 1024` (compare against 512) |
+| Is the engine flush hanging? | LogQL: `{namespace="micewriter", pod=~"engine-load-test-events.*"} \|~ "rotating column family\|commit succeeded"` and eyeball the time gap |
 
 An "engine OOMKilled at 512 Mi" result is only trustworthy if (a) MinIO and Nessie throttle queries are zero in the same window, and (b) the engine pod's memory was actually climbing on its own rather than stalling while waiting on a slow flush partner.
 
 ### 5.5 Force a flush at end of test (optional)
 
-If you don't want to wait for the 10-minute jitter window, trigger a manual flush immediately after the load generator finishes. `ENABLE_MANUAL_FLUSH=true` is set by default in the local injector values:
+If you don't want to wait for the 10-minute jitter window, trigger a manual flush immediately after the load generator finishes. `enableManualFlush=true` is set by default in the local pipeline chart values, which enables the `FlushNow` RPC:
 
 ```powershell
 curl -X POST http://k8s-node-1.local/events/flush
@@ -235,7 +238,7 @@ Wait for the timer to trigger (up to 12 minutes), then confirm the following:
 
 1. **Flush log sequence**: Look for the timer trigger followed by a successful commit:
    ```powershell
-   kubectl logs -n micewriter-sandbox deploy/micewriter-sandbox -c micewriter-engine
+   kubectl logs -n micewriter deploy/engine-load-test-events
    ```
    Expected logs:
    ```
@@ -243,7 +246,7 @@ Wait for the timer to trigger (up to 12 minutes), then confirm the following:
    Starting flush cycle
    Column family rotated frozen=active
    ...
-   Iceberg commit successful table=telemetry_events
+   Iceberg commit successful table=load_test_events
    ```
 2. **No retries**: Ensure there are no 404 or retry loops in the engine logs during this commit.
 3. **Row counts**: Confirm the row count in the resulting MinIO Parquet files matches the sandbox `totalSent` minus any rows in the next active CF.
@@ -267,19 +270,19 @@ After a manual sweep finishes, dump `GET /loadtest/{runId}` for the per-cell sen
 Engine CPU/Mem/RocksDB/flush-latency columns are populated from Grafana Cloud queries (see §2) once the corresponding cells have been re-run against the fixed Nessie. Scenarios 1 and 2 are clean baseline; 3 and 4 need re-execution before they constitute real sizing data.
 
 > [!NOTE]
-> The 2026-05-31 rows above are a historical record of that run and are left unedited. They predate two v1-line changes: the wire format has since moved from CBOR to **JSON**, and the `UdsConnection` reconnect gap (`micewriter-sdk-java#1`, the cause of the scenario-4 cascade) has since been **fixed** (lazy reconnect + automatic schema re-registration). Re-runs should be interpreted against current v1 behavior.
+> The 2026-05-31 rows above are a historical record of an early run on the pre-split **v1 UDS** transport, left unedited. v2 publishes over **gRPC** (and kept the CBOR record shape), so the scenario-4 cascade — caused by a `UdsConnection` reconnect gap (`micewriter-sdk-java#1`) — does not apply to the v2 path, where gRPC handles reconnect natively. Re-runs on a v2 pipeline should be interpreted against current v2 behavior.
 
-**Peak CPU** = `max_over_time(rate(container_cpu_usage_seconds_total{container="micewriter-engine"}[1m])[15m:])`.  
-**Peak Mem** = `max_over_time(container_memory_working_set_bytes{container="micewriter-engine"}[15m:])`.  
+**Peak CPU** = `max_over_time(rate(container_cpu_usage_seconds_total{namespace="micewriter", pod=~"engine-load-test-events.*"}[1m])[15m:])`.  
+**Peak Mem** = `max_over_time(container_memory_working_set_bytes{namespace="micewriter", pod=~"engine-load-test-events.*"}[15m:])`.  
 **Flush latency** = wall-clock between `rotating column family` and `Table flushed` in the engine logs (Loki query in §2).
 
 ---
 
 ## 7. Sizing Decisions
 
-Results feed directly into two files:
+Results feed directly into the pipeline chart defaults:
 
-### `micewriter-k8s-injector/charts/micewriter-k8s-injector/values.yaml`
+### `micewriter-local-infra/charts/table-pipeline/values.yaml`
 
 ```yaml
 engine:
@@ -290,10 +293,10 @@ engine:
     limits:
       cpu: 500m      # ← set to peak CPU of the highest planned load scenario + 20% headroom
       memory: 512Mi  # ← set to peak memory + 20% headroom; must never OOMKill in normal use
-  rocksdbStorageSize: "10Gi"  # ← set to (peak RocksDB usage × flush_interval_secs / 600) × 2
+  rocksdbVolumeSize: "10Gi"  # ← set to (peak RocksDB usage × flush_interval_secs / 600) × 2
 ```
 
-The `requests` value determines scheduling density — a lower request means more engine sidecars can co-locate on a node. The `limits` value is the safety cap.
+The `requests` value determines scheduling density — a lower request means more engine pods can co-locate on a node. The `limits` value is the safety cap. Because sizing is **per table**, a hot table can raise these in its own Helm release without affecting other tables' pipelines.
 
 ### Decision rule for limits
 
@@ -309,8 +312,8 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 | Gap | Impact | Suggested fix |
 |---|---|---|
 | Sandbox `TelemetryEvent.payload` is a `String` | 10 MB string payloads are valid Java but test a different serialization path than real binary tensor payloads | Acceptable for initial sizing; revisit when binary payloads are introduced |
-| Single-replica only | Catalog contention from concurrent commits across many engine sidecars is not exercised | Phase-2 follow-up: scale the sandbox Deployment to 2–3 replicas (lifting the k8s-node-3 nodeSelector) and re-run one or two cells. See [feasibility.md §4](feasibility.md) for what the local setup does and does not measure. |
-| Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, JSON-to-Arrow parse latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and inject the corresponding scrape annotations via the k8s-injector webhook. |
+| Single-pod pipeline only | Catalog contention from concurrent commits across many engine pods in one pipeline (HPA) is not exercised | Phase-2 follow-up: raise the pipeline's HPA `min`/`max` to 2–3 pods and re-run one or two cells. See [feasibility.md §4](feasibility.md) for what the local setup does and does not measure. |
+| Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, CBOR→Arrow parse latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and ship the scrape annotations via the pipeline chart's pod template. |
 
 ---
 
