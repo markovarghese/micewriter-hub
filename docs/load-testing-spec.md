@@ -31,7 +31,7 @@ All metrics land in **Grafana Cloud** via the Grafana Alloy DaemonSet already in
 | Engine CPU (used) | cAdvisor → Grafana Cloud | `rate(container_cpu_usage_seconds_total{namespace="micewriter", pod=~"engine-load-test-events.*"}[1m])` |
 | Engine memory (used) | cAdvisor → Grafana Cloud | `container_memory_working_set_bytes{namespace="micewriter", pod=~"engine-load-test-events.*"}` |
 | RocksDB volume utilisation | kubelet → Grafana Cloud | `kubelet_volume_stats_used_bytes{persistentvolumeclaim=~"rocksdb-.*"}` |
-| Engine flush latency | Engine logs → Loki | LogQL: `{namespace="micewriter", pod=~"engine-load-test-events.*"} \|~ "rotating column family\|Table flushed"` — measure the wall-clock gap between rotation and commit |
+| Engine flush latency (CF to S3) | Engine logs → Loki | LogQL: `{namespace="micewriter", pod=~"engine-load-test-events.*"} \|~ "rotating column family\|uploaded Parquet"` — measure the wall-clock gap between rotation and S3 PUT completion |
 | MinIO throughput / errors | MinIO Prometheus endpoint → Grafana Cloud | `rate(minio_s3_traffic_received_bytes_total[1m])`, `rate(minio_s3_requests_errors_total[1m])` |
 | Nessie commit latency | Nessie Quarkus metrics → Grafana Cloud | `histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri=~".*iceberg.*"}[1m]))` |
 | Sandbox send rate / latency / errors | Micrometer → Grafana Cloud | `rate(micewriter_loadtest_events_sent_total[1m])`, `micewriter_loadtest_send_seconds` histogram |
@@ -48,7 +48,7 @@ The independent variables and their levels:
 |---|---|
 | **Event size** (size of `payload` field) | 1 KB · 100 KB · 1 MB · 10 MB |
 | **Event rate** | 1 · 10 · 100 · 500 events/sec |
-| **Duration** | 15 min (covers at least one full flush cycle) |
+| **Duration** | 5 min (ensures total sweep data stays under the 100 GB MinIO disk cap) |
 
 This produces a 4 × 4 matrix of 16 scenarios. Not all combinations are meaningful — a 10 MB payload at 500 events/sec (5 GB/sec into a pipeline pod with a 512 Mi memory limit) will OOMKill immediately. Run scenarios in order of increasing stress and stop a series early if the pod is evicted.
 
@@ -64,7 +64,7 @@ Start with the diagonal (moderate stress per cell), then fill in neighbours:
 500/s   [12 ]   [13 ]    skip    skip
 ```
 
-Scenarios marked `skip` are expected to exceed the engine's memory limit given the 10-minute RocksDB buffer window. Run them only after resource limits are raised experimentally.
+Scenarios marked `skip` exceed the **250 MB/sec throughput cap**. Due to the 100 GB storage limit on the MinIO node (`k8s-node-2`), running throughputs higher than 250 MB/sec (e.g. 10 MB @ 100/s) would rapidly exhaust the cluster's physical disk space during the sweep. v2's AOT static compilation is highly memory-efficient, so these scenarios would *not* OOMKill the pods, but they are skipped strictly for disk capacity reasons.
 
 ---
 
@@ -131,7 +131,7 @@ Example: 100 KB events at 10/sec for 15 minutes:
 ```powershell
 curl -X POST http://k8s-node-1.local/loadtest/start `
      -H 'Content-Type: application/json' `
-     -d '{"rate":10,"payloadSizeBytes":102400,"durationSec":900}'
+     -d '{"rate":10,"payloadSizeBytes":102400,"durationSec":300}'
 # → { "runId": "...", "status": "RUNNING" }
 ```
 
@@ -149,25 +149,25 @@ curl -X POST http://k8s-node-1.local/loadtest/sweep `
 {
   "restSecondsBetween": 60,
   "cells": [
-    {"rate":1,   "payloadSizeBytes":1024,     "durationSec":900},
-    {"rate":1,   "payloadSizeBytes":102400,   "durationSec":900},
-    {"rate":1,   "payloadSizeBytes":1048576,  "durationSec":900},
-    {"rate":1,   "payloadSizeBytes":10485760, "durationSec":900},
-    {"rate":10,  "payloadSizeBytes":1024,     "durationSec":900},
-    {"rate":10,  "payloadSizeBytes":102400,   "durationSec":900},
-    {"rate":10,  "payloadSizeBytes":1048576,  "durationSec":900},
-    {"rate":10,  "payloadSizeBytes":10485760, "durationSec":900},
-    {"rate":100, "payloadSizeBytes":1024,     "durationSec":900},
-    {"rate":100, "payloadSizeBytes":102400,   "durationSec":900},
-    {"rate":100, "payloadSizeBytes":1048576,  "durationSec":900},
-    {"rate":500, "payloadSizeBytes":1024,     "durationSec":900},
-    {"rate":500, "payloadSizeBytes":102400,   "durationSec":900}
+    {"rate":1,   "payloadSizeBytes":1024,     "durationSec":300},
+    {"rate":1,   "payloadSizeBytes":102400,   "durationSec":300},
+    {"rate":1,   "payloadSizeBytes":1048576,  "durationSec":300},
+    {"rate":1,   "payloadSizeBytes":10485760, "durationSec":300},
+    {"rate":10,  "payloadSizeBytes":1024,     "durationSec":300},
+    {"rate":10,  "payloadSizeBytes":102400,   "durationSec":300},
+    {"rate":10,  "payloadSizeBytes":1048576,  "durationSec":300},
+    {"rate":10,  "payloadSizeBytes":10485760, "durationSec":300},
+    {"rate":100, "payloadSizeBytes":1024,     "durationSec":300},
+    {"rate":100, "payloadSizeBytes":102400,   "durationSec":300},
+    {"rate":100, "payloadSizeBytes":1048576,  "durationSec":300},
+    {"rate":500, "payloadSizeBytes":1024,     "durationSec":300},
+    {"rate":500, "payloadSizeBytes":102400,   "durationSec":300}
   ]
 }
 JSON
 ```
 
-The full sweep takes ~3.5 hours (13 × 15 min + 12 × 60 s rest). Run it overnight.
+The full sweep takes ~1.3 hours (13 × 5 min + 12 × 60 s rest). Total data generated is ~85 GB, fitting comfortably within the 100 GB node limit.
 
 ### 5.3 Watch progress
 
@@ -212,7 +212,7 @@ If a scenario shows the engine OOMKilling, **verify the engine itself is the bot
 | Is Nessie CPU-throttled? | `rate(container_cpu_cfs_throttled_seconds_total{pod=~"micewriter-nessie.*"}[1m]) > 0` |
 | Is Nessie's commit slow? | `histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri=~".*iceberg.*"}[1m]))` |
 | Is the engine pod memory near limit? | `container_memory_working_set_bytes{namespace="micewriter", pod=~"engine-load-test-events.*"} / 1024 / 1024` (compare against 512) |
-| Is the engine flush hanging? | LogQL: `{namespace="micewriter", pod=~"engine-load-test-events.*"} \|~ "rotating column family\|commit succeeded"` and eyeball the time gap |
+| Is the engine flush hanging? | LogQL: `{namespace="micewriter", pod=~"engine-load-test-events.*"} \|~ "rotating column family\|uploaded Parquet"` and eyeball the time gap |
 
 An "engine OOMKilled at 512 Mi" result is only trustworthy if (a) MinIO and Nessie throttle queries are zero in the same window, and (b) the engine pod's memory was actually climbing on its own rather than stalling while waiting on a slow flush partner.
 
@@ -236,7 +236,7 @@ curl -X POST http://k8s-node-1.local/loadtest/start `
 
 Wait for the timer to trigger (up to 12 minutes), then confirm the following:
 
-1. **Flush log sequence**: Look for the timer trigger followed by a successful commit:
+1. **Flush log sequence**: Look for the timer trigger followed by the S3 upload, and eventually (up to 5 minutes later) the Leader's commit ACK:
    ```powershell
    kubectl logs -n micewriter deploy/engine-load-test-events
    ```
@@ -245,8 +245,9 @@ Wait for the timer to trigger (up to 12 minutes), then confirm the following:
    Timer triggered flush
    Starting flush cycle
    Column family rotated frozen=active
-   ...
-   Iceberg commit successful table=load_test_events
+   uploaded Parquet to S3
+   ... (up to 5 minute wait for Leader micro-batching window) ...
+   Leader commit ACK received table=load_test_events
    ```
 2. **No retries**: Ensure there are no 404 or retry loops in the engine logs during this commit.
 3. **Row counts**: Confirm the row count in the resulting MinIO Parquet files matches the sandbox `totalSent` minus any rows in the next active CF.
@@ -274,7 +275,7 @@ Engine CPU/Mem/RocksDB/flush-latency columns are populated from Grafana Cloud qu
 
 **Peak CPU** = `max_over_time(rate(container_cpu_usage_seconds_total{namespace="micewriter", pod=~"engine-load-test-events.*"}[1m])[15m:])`.  
 **Peak Mem** = `max_over_time(container_memory_working_set_bytes{namespace="micewriter", pod=~"engine-load-test-events.*"}[15m:])`.  
-**Flush latency** = wall-clock between `rotating column family` and `Table flushed` in the engine logs (Loki query in §2).
+**Flush latency** = wall-clock between `rotating column family` and `uploaded Parquet` in the engine logs (Loki query in §2).
 
 ---
 
@@ -312,7 +313,6 @@ If peak memory at a given scenario exceeds the current limit (`512Mi`):
 | Gap | Impact | Suggested fix |
 |---|---|---|
 | Sandbox `TelemetryEvent.payload` is a `String` | 10 MB string payloads are valid Java but test a different serialization path than real binary tensor payloads | Acceptable for initial sizing; revisit when binary payloads are introduced |
-| Single-pod pipeline only | Catalog contention from concurrent commits across many engine pods in one pipeline (HPA) is not exercised | Phase-2 follow-up: raise the pipeline's HPA `min`/`max` to 2–3 pods and re-run one or two cells. See [feasibility.md §4](feasibility.md) for what the local setup does and does not measure. |
 | Rust engine has no Prometheus endpoint | Internal engine metrics (RocksDB memtable size, CBOR→Arrow parse latency, Parquet compile time) are visible only as log lines | Future: add a `prometheus` crate + HTTP `/metrics` handler in `micewriter-engine`, and ship the scrape annotations via the pipeline chart's pod template. |
 
 ---
