@@ -29,11 +29,11 @@ The wire format keeps the original pre-split (v1.0.0) **CBOR** payload shape; **
 
 | RPC | Direction | Payload | Notes |
 |---|---|---|---|
-| `RegisterSchema` | SDK → Pipeline | JSON `{ table, namespace, fields }` | Unary; called once per `@IcebergEntity` class at app startup. Bounded retry on unreachable pipeline. |
+| `RegisterSchema` | SDK → Pipeline | JSON `{ table, namespace, fields }` | Unary; called once per `@IcebergEntity` class at app startup. Validation/sync handshake — schema rejected → non-retriable hard error, startup aborts; unreachable → bounded retry for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s), then hard error. |
 | `Ingest` | SDK → Pipeline | Streaming CBOR records | Bidi streaming over a long-lived channel. ACK per record. |
 | `FlushNow` | SDK → Pipeline | Empty | Unary; only honored when `ENABLE_MANUAL_FLUSH=true`. Test environments only. |
 
-The 16 MB per-payload cap still applies, but thanks to the **AOT Static CBOR → Arrow Compilation** architecture, v2 completely eliminates the CBOR-DOM memory amplification problem. See [system-overview.md §2](system-overview.md) for the critical rules governing CI/CD deployment ordering and schema backward compatibility.
+The 16 MB per-payload cap still applies. The **AOT Static CBOR → Arrow Compilation** design goal (static Rust structs per table, no dynamic DOM) eliminates the CBOR-DOM amplification problem; see [system-overview.md §2.3](system-overview.md) for implementation status and the rules governing CI/CD deployment ordering and schema backward compatibility.
 
 ## 4. SDK table-to-endpoint routing
 
@@ -57,7 +57,7 @@ micewriter:
 
 | Event | Behavior |
 |---|---|
-| **Pipeline unreachable at app startup** | `RegisterSchema` retries with exponential backoff for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s), then proceeds. First `sendAsyncWithRetry()` per affected table retries registration before its first record. App never blocks indefinitely. |
+| **Schema registration at app startup** | `RegisterSchema` validates the SDK's schema against the engine's catalog-derived schema. **Rejected (incompatible):** non-retriable hard error — app startup aborts. **Engine unreachable:** retry with exponential backoff for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s); if the budget is exhausted, hard error — app startup aborts. The SDK never proceeds without a confirmed registration, and never blocks indefinitely. |
 | **Pipeline unreachable during `sendAsyncWithRetry()`** | Bounded retry with exponential backoff for `MICEWRITER_SEND_RETRY_SECONDS` (default 30s), then throws with the unresolvable table named. No unbounded SDK buffering (preserves JVM-heap-pressure guarantee). |
 | **Engine pod restart (HPA scale, deploy, OOM)** | gRPC channel transparently re-establishes via native retry policy. In-flight records on the dying pod are flushed via `SIGTERM` emergency drain; records not yet ACKed by the SDK are re-sent on the new channel. |
 | **Leader pod restart (during commit phase)** | Leader lease expires and another worker claims it. Workers holding frozen RocksDB column families retry sending their `CommitBatch` gRPC requests to the new leader until successful. |
@@ -80,7 +80,7 @@ For zero-trust adopters, mTLS is added as a **service-mesh overlay** without SDK
 | Engine upgrade | Recycle every app pod | Roll one pipeline; other tables untouched |
 | Catalog commit contention | Across all sidecars, same table | **Bounded to one pipeline's pod count per table** |
 | Blast radius of engine bug | Per app pod | **Per table** — other pipelines unaffected |
-| Adding a new table | Pure catalog op | Helm release + catalog op (one-time per table) |
+| Adding a new table | Pure catalog op | Add schema to engine `schemas/`, rebuild + push image, roll all pipelines, Helm release + catalog op |
 
 **HPA signal:** v2.0 uses default CPU/memory metrics for simplicity. CPU is a lagging signal (spikes during flush, not ingest) and memory tracks RocksDB CF growth which is a decent flush-imminent proxy. If load testing shows CPU/memory reacts too slowly to bursts, the upgrade path is KEDA + PromQL against Grafana Cloud (`micewriter_rocksdb_cf_bytes`, `rate(micewriter_ingest_records_total[1m])`) — no SDK or engine changes required.
 
@@ -131,7 +131,9 @@ For a Spring Boot or Dropwizard app to start writing to a new Iceberg table:
    }
    ```
 
-2. **Platform team provisions the pipeline** (one Helm release per table — see §9).
+2. **Platform team registers the schema and provisions the pipeline:**
+   - Add `schemas/telemetry_events.json` to `micewriter-engine` (format: `{ table, namespace, fields }`, matching the `RegisterSchema` payload shape). Rebuild and push the engine image. Because the engine is a single shared image, this rolls **all** existing pipeline deployments to the new image — existing pipelines are unaffected at runtime; only a new dormant handler is added. This step must complete and all pipeline pods must be healthy **before** the app deploys (see the CI/CD ordering rule in [system-overview.md §2.3](system-overview.md)).
+   - Install a new Helm release for the table (see §9).
 
 3. **App config points at the resolver:**
    ```yaml

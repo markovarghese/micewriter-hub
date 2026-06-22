@@ -1,6 +1,9 @@
 # Claude Code local settings
 .claude/
 
+# Agent-loop working state (mw-loop skill audit trail for micewriter-sdk-java)
+agent-loop/
+
 # OS
 .DS_Store
 Thumbs.db

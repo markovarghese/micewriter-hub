@@ -55,7 +55,7 @@ v2 still offers *per-table* RAM sizing (small audit tables get small pods; large
 
 ### Throughput is no longer capped at the synchronous ceiling
 
-The early v1 SDK only had a blocking `send()`, which topped out around ~104 records/s waiting on per-record ACKs. The v1 SDK now offers a bounded-async path (`sendAsync` / `sendAsyncWithRetry`) with an 8 MiB byte-budget `Semaphore` for backpressure, and the synchronous `send()` is `@Deprecated`. This is not a v2-only property. *(Note: the current v2 SDK does not carry this async path — its `send()` is synchronous with a per-table lock.)*
+The early v1 SDK only had a blocking `send()`, which topped out around ~104 records/s waiting on per-record ACKs. The v1 SDK now offers a bounded-async path (`sendAsync` / `sendAsyncWithRetry`) with an 8 MiB byte-budget `Semaphore` for backpressure, and the synchronous `send()` is `@Deprecated`. This is not a v2-only property. *(Note: the v2 SDK also carries the bounded-async path — `sendAsync` / `sendAsyncWithRetry` with an in-flight byte-budget `Semaphore` and per-record ACK gating backpressure. Async throughput is not a v1-only differentiator.)*
 
 ## Why not other shapes considered
 

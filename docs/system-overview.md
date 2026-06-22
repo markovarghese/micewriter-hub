@@ -30,21 +30,23 @@ gRPC handles framing. The application-layer payload retains the original per-rec
 
 | RPC | Direction | Payload | Notes |
 |---|---|---|---|
-| `RegisterSchema` | SDK → Pipeline | JSON `{ table, namespace, fields }` | Unary; called once per `@IcebergEntity` class at app startup. Bounded retry on unreachable pipeline. |
+| `RegisterSchema` | SDK → Pipeline | JSON `{ table, namespace, fields }` | Unary; called once per `@IcebergEntity` class at app startup. Validation/sync handshake: schema rejected → non-retriable hard error, startup aborts; unreachable → bounded retry for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s), then hard error. No "proceed without registration" path. |
 | `Ingest` | SDK → Pipeline | Streaming CBOR records | Bidi streaming over a long-lived channel. ACK per record. |
 | `FlushNow` | SDK → Pipeline | Empty | Unary; honored only when `ENABLE_MANUAL_FLUSH=true` (non-production). |
 
 ### 2.3 Serialization
 - **Schemas (`RegisterSchema`)** are JSON.
 - **Telemetry records (`Ingest`)** are native CBOR bytes — keeping the SDK stateless, no Arrow schema dictionary per row, framework-agnostic for Spring Boot / Dropwizard.
-- **Engine pipeline (AOT Static CBOR → Arrow Compilation):** To achieve ultimate zero-copy performance and strict memory boundaries, v2 utilizes **Ahead-Of-Time (AOT) Schema Compilation**. Instead of dynamic AST parsing (e.g., transpiling to NDJSON), each `engine-{table}` Docker image is compiled via CI/CD with static Rust `ArrowBuilder`s tailored exactly to that table's Iceberg schema. Incoming CBOR bytes are mapped directly into static Rust structs using `#[derive(Deserialize)]` and pushed directly into Arrow.
+- **Engine pipeline (AOT Static CBOR → Arrow Compilation):** The engine ships as a **single shared Docker image** containing compiled handlers for every known table. Each handler is a statically typed Rust struct derived from that table's schema definition, selected at process startup by `MICEWRITER_TABLE` via a generated `match` — zero dynamic dispatch on the hot ingest path. Incoming CBOR bytes deserialize directly into the selected struct via `#[derive(Deserialize)]` and are pushed into statically compiled Arrow builders, eliminating any intermediate DOM. All handlers are compiled in at build time from `schemas/<table>.json` definition files via a `build.rs` code-generation step; only the handler matching `MICEWRITER_TABLE` is active per deployment, but all are present in the binary.
+
+  **Current implementation status:** `schema_codegen.rs` is manually maintained with a single handler for `load_test_events`. The `build.rs` codegen step (generating handlers from `schemas/*.json`) has not been implemented yet. Adding a new table currently requires manually editing `schema_codegen.rs` and rebuilding the image. All other design properties hold: one shared image, `MICEWRITER_TABLE` pins each pipeline at runtime, `RegisterSchema` is the schema compatibility handshake at app startup.
 
 > [!IMPORTANT]
-> **Mandatory Requirements for AOT Compilation**
-> 
-> Because the engine is statically compiled against a known schema, bypassing dynamic fallback pipelines, you **must** enforce two rules to prevent silent data loss during deployments:
-> 1. **Strict Backward Compatibility:** Schema evolutions (e.g., adding fields) must be backward compatible (e.g., new fields are optional/nullable). If an old app sends an old payload, the new statically compiled engine will gracefully default the missing fields to null.
-> 2. **Strict CI/CD Deployment Ordering:** The custom `engine-{table}` Deployment **must always** be rolled out and stabilized *before* the application Deployment. If a new app deploys first and sends unknown fields to an old engine, the Rust deserializer will silently ignore those fields, resulting in permanent data loss for the duration of the rolling deployment. To actively prevent this, the `RegisterSchema` RPC acts as a **Strict Safety Handshake**: the engine actively rejects the request if it contains unknown fields, intentionally crashing the misordered App deployment before data loss can occur.
+> **Mandatory Rules — required regardless of AOT implementation status**
+>
+> Because the engine binary is compiled against a fixed schema (whether manually maintained or auto-generated), there is no dynamic fallback. Two rules must be enforced to prevent silent data loss:
+> 1. **Strict Backward Compatibility:** Schema evolutions (e.g., adding fields) must be backward compatible (new fields must be optional/nullable). If an old app sends a payload missing the new field, the engine defaults it to null.
+> 2. **Strict CI/CD Deployment Ordering:** The `engine-{table}` Deployment **must always** be rolled out and stabilized *before* the application Deployment. If the app deploys first and sends unknown fields to the old engine, the Rust deserializer silently ignores them — permanent data loss for the duration of the rollout. The `RegisterSchema` RPC is the **safety handshake** that enforces this: the engine rejects a schema containing unknown fields, intentionally crashing the misordered app deployment before any data loss occurs.
 
 - **Payload limit:** hard-capped at **16 MB** at both SDK and engine. Because AOT static compilation avoids dynamic DOM amplification, a 16 MB payload parses directly into an optimal ~16 MB of statically typed Rust memory.
 

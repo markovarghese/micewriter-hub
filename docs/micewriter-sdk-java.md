@@ -63,7 +63,7 @@ In v2 there is no per-pod sidecar and no Unix domain socket. The SDK **routes ea
 ### RPCs
 | RPC | Direction | Payload | Notes |
 |---|---|---|---|
-| `RegisterSchema` | SDK → Pipeline | JSON `{ table, namespace, fields }` | Unary; called once per `@IcebergEntity` class at startup; bounded retry on an unreachable pipeline. |
+| `RegisterSchema` | SDK → Pipeline | JSON `{ table, namespace, fields }` | Unary; called once per `@IcebergEntity` class at startup. Validation/sync against the engine's catalog-derived schema. Schema rejection → hard error (startup aborts); unreachable → bounded retry, then hard error. |
 | `Ingest` | SDK → Pipeline | Streaming **CBOR** records | Bidi streaming over the long-lived channel; ACK per record. |
 | `FlushNow` | SDK → Pipeline | Empty | Unary; honored only when `ENABLE_MANUAL_FLUSH=true` (non-production). |
 
@@ -73,8 +73,9 @@ In v2 there is no per-pod sidecar and no Unix domain socket. The SDK **routes ea
 - **Payload cap** — 16 MB per record at both SDK and engine. (A 16 MB monolithic CBOR float array can expand into 200+ MB of `serde_json::Value` DOM in the engine's `arrow-json` parse step.) See [system-overview.md §2.3](system-overview.md).
 
 ### Lifecycle & failure modes
-- **Pipeline unreachable at startup:** `RegisterSchema` retries with exponential backoff for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s), then proceeds; the first `sendAsyncWithRetry()` per affected table retries registration before its first record.
+- **Schema registration at startup:** `RegisterSchema` is a validation/sync step — the engine already knows the table's schema from the Iceberg catalog; the SDK announces its schema and the engine confirms compatibility. If the engine **rejects** the schema (incompatible), this is a non-retriable hard error and **app startup is aborted**. If the engine is **unreachable**, the SDK retries with exponential backoff for `MICEWRITER_REGISTER_RETRY_SECONDS` (default 30s); if the budget is exhausted, that too is a hard error and **app startup is aborted**. There is no "proceed without successful registration" path.
 - **Pipeline unreachable during a send:** bounded retry with exponential backoff for `MICEWRITER_SEND_RETRY_SECONDS` (default 30s), then the future completes exceptionally with the unresolvable table named. **No unbounded SDK buffering** (preserves the JVM-heap-pressure guarantee).
+- **Engine backpressure (in-flight budget exhausted):** the "no unbounded SDK buffering" guarantee is enforced by a per-channel in-flight byte-budget `Semaphore`. When the engine stops draining ACKs and a send cannot acquire its budget within the ACK timeout, the future completes exceptionally rather than buffering — and the **failing table is named** in the exception (`sendAsync to table '<table>': in-flight budget exhausted …`), so an operator can identify the backpressured pipeline from the exception alone (symmetric with the table-named retry-exhaustion message).
 - **Whole-pipeline outage:** sends to that table fail fast after the retry budget; other tables' pipelines are unaffected.
 
 ### Auth

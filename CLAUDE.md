@@ -3,6 +3,20 @@
 This repo is the architecture/design hub for the mIceWriter ecosystem.
 This checkout is rooted on the **v2 / main** release line.
 
+## Environment
+
+This is a WSL2 Linux environment — use bash for shell commands.
+
+## Build & Test
+
+Tools are installed natively: use `cargo` for Rust (engine) components, `mvn` for Java (SDK) components. After code changes, build and verify all tests pass before committing.
+
+## Git Workflow
+
+For multi-repo git operations across the micewriter* repos, use a single batched/scripted approach rather than spawning many parallel git pulls (parallel SSH-agent setup is slow and hangs).
+
+Standard close-out workflow: commit meaningful changes, ensure `.claude/` is gitignored, and push. Skip binary/build artifacts.
+
 ## Two release lines are active
 
 The ecosystem maintains two parallel lines across six sibling repos:
